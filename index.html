@@ -41,8 +41,6 @@ export default function App() {
         }
         setSyncStatus('loading');
         try {
-            // Using a hidden iframe/form trick is common for GAS, 
-            // but modern 'fetch' with JSON works if the script handles CORS correctly via OPTIONS or just POST
             const response = await fetch(APP_SCRIPT_URL, {
                 method: 'POST',
                 body: JSON.stringify(payload)
