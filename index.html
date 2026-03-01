@@ -18,13 +18,12 @@
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         
-        /* OMR Template Strict Sizing: 5 inches by 7 inches */
         .omr-template {
             width: 5in;
             height: 7in;
             background-color: white;
             color: black;
-            border: 4px solid black; /* Fiducial marker border for scanning */
+            border: 4px solid black;
             box-sizing: border-box;
             padding: 0.2in;
             position: relative;
@@ -41,7 +40,7 @@
             justify-content: center;
             font-size: 8px;
             font-weight: bold;
-            color: #ccc; /* Very light text so it doesn't interfere with scan darkness */
+            color: #ccc;
             margin: 1px;
             background-color: transparent;
         }
@@ -51,7 +50,6 @@
             color: black !important;
         }
 
-        /* Print Styles */
         @media print {
             body * { visibility: hidden; }
             #printable-template, #printable-template * { visibility: visible; }
@@ -69,9 +67,19 @@
     <div id="root"></div>
 
     <script type="text/babel">
+        // ==========================================
+        // 🔧 CONFIGURATION
+        // Paste your Google Apps Script URL here:
+        // ==========================================
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec";
+        
+        // Helper to check if cloud is configured
+        const isCloudConfigured = GAS_URL && GAS_URL.startsWith("https://script.google.com");
+
+
         const { useState, useEffect, useRef } = React;
 
-        // --- ICONS (Inline SVGs to prevent dependency issues) ---
+        // --- ICONS ---
         const Icon = ({ name, size = 20, className = "" }) => {
             const icons = {
                 Home: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
@@ -81,46 +89,196 @@
                 Scan: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>,
                 Trash: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
                 Download: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-                Printer: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                Printer: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
+                Lock: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+                Cloud: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>,
+                LogOut: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+                Save: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
+                Camera: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>,
+                Upload: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             };
             return icons[name] || null;
         };
 
-        // --- UTILS ---
         const generateId = () => Math.random().toString(36).substr(2, 9);
+
+        // --- AUTHENTICATION SCREEN ---
+        const AuthScreen = ({ onLogin }) => {
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [msg, setMsg] = useState('');
+
+            const handleAuth = async (action) => {
+                if (!username || !password) return setError("Username and password required.");
+                setError(''); setMsg('');
+                setLoading(true);
+
+                if (isCloudConfigured) {
+                    try {
+                        const res = await fetch(GAS_URL, {
+                            method: 'POST',
+                            body: JSON.stringify({ action, username, password })
+                        });
+                        const data = await res.json();
+                        if (data.status === 'success') {
+                            onLogin({ username, password }, data.data);
+                            if (action === 'REGISTER') setMsg("Registered on Google Drive! Please login.");
+                        } else {
+                            setError(data.message || "Authentication failed.");
+                        }
+                    } catch (err) {
+                        setError("Network error. Make sure your Apps Script Web App is deployed and URL is correct.");
+                    }
+                } else {
+                    const localUsers = JSON.parse(localStorage.getItem('omr_local_users') || '{}');
+                    
+                    if (action === 'REGISTER') {
+                        if (localUsers[username]) {
+                            setError("Username already exists locally.");
+                        } else {
+                            localUsers[username] = password;
+                            localStorage.setItem('omr_local_users', JSON.stringify(localUsers));
+                            localStorage.setItem(`omr_db_${username}`, JSON.stringify({ classes: [], students: [], exams: [], submissions: [] }));
+                            setMsg("Registered successfully locally! You can now login.");
+                        }
+                    } else if (action === 'LOGIN') {
+                        if (localUsers[username] !== password) {
+                            setError("Invalid username or password.");
+                        } else {
+                            const userDbStr = localStorage.getItem(`omr_db_${username}`);
+                            const userDb = userDbStr ? JSON.parse(userDbStr) : { classes: [], students: [], exams: [], submissions: [] };
+                            onLogin({ username, password }, userDb);
+                        }
+                    }
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
+                        <div className="flex justify-center mb-4">
+                            <div className="bg-blue-100 p-4 rounded-full text-blue-600">
+                                <Icon name="Lock" size={32} />
+                            </div>
+                        </div>
+                        <h2 className="text-2xl font-black text-center mb-2">ScanMaster Login</h2>
+                        <p className="text-slate-500 text-sm text-center mb-8">Register an account or login to access your data.</p>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Username</label>
+                                <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Enter username..." />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Password</label>
+                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Enter password..." />
+                            </div>
+
+                            {!isCloudConfigured && (
+                                <p className="text-xs text-orange-600 bg-orange-50 p-2 rounded border border-orange-200 text-center">
+                                    ⚠️ Cloud URL not configured. Data will be saved locally in this browser.
+                                </p>
+                            )}
+
+                            {error && <p className="text-red-500 text-sm text-center font-medium bg-red-50 p-2 rounded border border-red-200">{error}</p>}
+                            {msg && <p className="text-green-600 text-sm text-center font-medium bg-green-50 p-2 rounded border border-green-200">{msg}</p>}
+
+                            <div className="flex gap-4 pt-4">
+                                <button onClick={() => handleAuth('LOGIN')} disabled={loading} className="flex-1 bg-slate-900 text-white py-2 rounded-lg font-bold hover:bg-slate-800 disabled:opacity-50 transition-colors">
+                                    Login
+                                </button>
+                                <button onClick={() => handleAuth('REGISTER')} disabled={loading} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                                    Register
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
 
         // --- MAIN APP COMPONENT ---
         const App = () => {
-            const [currentView, setCurrentView] = useState('dashboard');
-            
-            // Database State
-            const [db, setDb] = useState({
-                classes: [],
-                students: [],
-                exams: [],
-                submissions: []
+            const [user, setUser] = useState(() => {
+                const saved = localStorage.getItem('omr_current_user');
+                return saved ? JSON.parse(saved) : null;
             });
+            const [currentView, setCurrentView] = useState('dashboard');
+            const [isSyncing, setIsSyncing] = useState(false);
+            
+            const [db, setDb] = useState({ classes: [], students: [], exams: [], submissions: [] });
 
-            // Load initial data
             useEffect(() => {
-                const stored = localStorage.getItem('omr_db');
-                if (stored) setDb(JSON.parse(stored));
-            }, []);
+                if (user && !isCloudConfigured) {
+                    const storedDb = localStorage.getItem(`omr_db_${user.username}`);
+                    if (storedDb) {
+                        setDb(JSON.parse(storedDb));
+                    }
+                }
+            }, [user]);
 
-            // Save data on change
             useEffect(() => {
-                localStorage.setItem('omr_db', JSON.stringify(db));
-            }, [db]);
+                if (user && db.classes) {
+                    localStorage.setItem(`omr_db_${user.username}`, JSON.stringify(db));
+                }
+            }, [db, user]);
 
-            // --- VIEW CONTROLLERS ---
+            const handleLogin = (loggedUser, loadedDb) => {
+                setUser(loggedUser);
+                localStorage.setItem('omr_current_user', JSON.stringify(loggedUser));
+                
+                if (loadedDb) {
+                    setDb(loadedDb);
+                    localStorage.setItem(`omr_db_${loggedUser.username}`, JSON.stringify(loadedDb));
+                }
+            };
+
+            const handleLogout = () => {
+                setUser(null);
+                setDb({ classes: [], students: [], exams: [], submissions: [] });
+                localStorage.removeItem('omr_current_user');
+            };
+
+            const handleCloudSave = async () => {
+                if (!isCloudConfigured) {
+                    alert("No Cloud URL configured in the code. Data is only saved locally.");
+                    return;
+                }
+                setIsSyncing(true);
+                try {
+                    const res = await fetch(GAS_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ action: 'SAVE', username: user.username, password: user.password, data: db })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success') {
+                        alert("Successfully Synced to Google Drive!");
+                    } else {
+                        alert("Error syncing: " + data.message);
+                    }
+                } catch (err) {
+                    alert("Network error. Could not reach the server.");
+                }
+                setIsSyncing(false);
+            };
+
+            if (!user) {
+                return <AuthScreen onLogin={handleLogin} />;
+            }
+
             const renderView = () => {
                 switch (currentView) {
-                    case 'dashboard': return <Dashboard db={db} />;
+                    case 'dashboard': return <Dashboard db={db} user={user} />;
                     case 'classes': return <ClassManager db={db} setDb={setDb} />;
                     case 'students': return <StudentManager db={db} setDb={setDb} />;
                     case 'exams': return <ExamManager db={db} setDb={setDb} setCurrentView={setCurrentView} />;
                     case 'scanner': return <Scanner db={db} setDb={setDb} />;
-                    default: return <Dashboard db={db} />;
+                    default: return <Dashboard db={db} user={user} />;
                 }
             };
 
@@ -138,7 +296,7 @@
                         <nav className="flex-1 px-4 space-y-2">
                             {[
                                 { id: 'dashboard', icon: 'Home', label: 'Dashboard' },
-                                { id: 'classes', icon: 'Book', label: 'Classes & Sections' },
+                                { id: 'classes', icon: 'Book', label: 'Classes' },
                                 { id: 'students', icon: 'Users', label: 'Students' },
                                 { id: 'exams', icon: 'FileText', label: 'Exams & Templates' },
                                 { id: 'scanner', icon: 'Scan', label: 'Scan & Grade' },
@@ -153,6 +311,32 @@
                                 </button>
                             ))}
                         </nav>
+                        
+                        {/* User & Cloud Controls */}
+                        <div className="p-4 border-t border-slate-700 bg-slate-800/50">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-slate-300">
+                                    <Icon name="Users" size={16} />
+                                </div>
+                                <div className="overflow-hidden">
+                                    <p className="text-sm font-bold truncate">{user.username}</p>
+                                    <p className="text-xs text-slate-400 truncate flex items-center gap-1">
+                                        {isCloudConfigured ? <><span className="w-2 h-2 rounded-full bg-green-500"></span> Cloud Sync On</> : <><span className="w-2 h-2 rounded-full bg-orange-500"></span> Local Only</>}
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                                {isCloudConfigured && (
+                                    <button onClick={handleCloudSave} disabled={isSyncing} className="flex-1 flex justify-center items-center gap-1 bg-green-600 hover:bg-green-700 text-white py-1.5 rounded-lg text-xs font-bold transition">
+                                        {isSyncing ? 'Syncing...' : <><Icon name="Cloud" size={14} /> Sync</>}
+                                    </button>
+                                )}
+                                <button onClick={handleLogout} className="flex-1 flex justify-center items-center gap-1 bg-slate-700 hover:bg-red-600 text-white py-1.5 rounded-lg text-xs font-bold transition">
+                                    <Icon name="LogOut" size={14} /> Logout
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Main Content */}
@@ -165,25 +349,26 @@
 
         // --- COMPONENTS ---
 
-        const Dashboard = ({ db }) => (
+        const Dashboard = ({ db, user }) => (
             <div className="animate-fade-in">
-                <h2 className="text-3xl font-black text-slate-800 mb-6">Dashboard</h2>
+                <h2 className="text-3xl font-black text-slate-800 mb-2">Welcome, {user.username}!</h2>
+                <p className="text-slate-500 mb-8">Here's the overview of your classes and evaluation data.</p>
                 <div className="grid grid-cols-4 gap-6">
                     <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                         <div className="p-4 bg-blue-100 text-blue-600 rounded-xl"><Icon name="Book" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Classes</p><p className="text-3xl font-black">{db.classes.length}</p></div>
+                        <div><p className="text-sm font-bold text-slate-400 uppercase">Classes</p><p className="text-3xl font-black">{db.classes?.length || 0}</p></div>
                     </div>
                     <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                         <div className="p-4 bg-green-100 text-green-600 rounded-xl"><Icon name="Users" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Students</p><p className="text-3xl font-black">{db.students.length}</p></div>
+                        <div><p className="text-sm font-bold text-slate-400 uppercase">Students</p><p className="text-3xl font-black">{db.students?.length || 0}</p></div>
                     </div>
                     <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                         <div className="p-4 bg-purple-100 text-purple-600 rounded-xl"><Icon name="FileText" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Exams</p><p className="text-3xl font-black">{db.exams.length}</p></div>
+                        <div><p className="text-sm font-bold text-slate-400 uppercase">Exams</p><p className="text-3xl font-black">{db.exams?.length || 0}</p></div>
                     </div>
                     <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                         <div className="p-4 bg-orange-100 text-orange-600 rounded-xl"><Icon name="Scan" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Scans</p><p className="text-3xl font-black">{db.submissions.length}</p></div>
+                        <div><p className="text-sm font-bold text-slate-400 uppercase">Scans</p><p className="text-3xl font-black">{db.submissions?.length || 0}</p></div>
                     </div>
                 </div>
             </div>
@@ -195,7 +380,7 @@
             const addClass = (e) => {
                 e.preventDefault();
                 if (!name.trim()) return;
-                setDb(prev => ({ ...prev, classes: [...prev.classes, { id: generateId(), name }] }));
+                setDb(prev => ({ ...prev, classes: [...(prev.classes || []), { id: generateId(), name }] }));
                 setName('');
             };
 
@@ -212,9 +397,9 @@
                             <form onSubmit={addClass} className="space-y-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Class/Section Name</label>
-                                    <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. Grade 10 - Newton" required />
+                                    <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g. Grade 10 - Newton" required />
                                 </div>
-                                <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700">Add Class</button>
+                                <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">Add Class</button>
                             </form>
                         </div>
                         <div className="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -227,16 +412,16 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {db.classes.map(c => (
+                                    {(db.classes || []).map(c => (
                                         <tr key={c.id} className="border-b last:border-0 hover:bg-slate-50">
                                             <td className="p-4 font-medium">{c.name}</td>
-                                            <td className="p-4">{db.students.filter(s => s.classId === c.id).length}</td>
+                                            <td className="p-4">{(db.students || []).filter(s => s.classId === c.id).length}</td>
                                             <td className="p-4 text-right">
-                                                <button onClick={() => deleteClass(c.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Icon name="Trash" size={16}/></button>
+                                                <button onClick={() => deleteClass(c.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Icon name="Trash" size={16}/></button>
                                             </td>
                                         </tr>
                                     ))}
-                                    {db.classes.length === 0 && <tr><td colSpan="3" className="p-8 text-center text-slate-500">No classes added yet.</td></tr>}
+                                    {(!db.classes || db.classes.length === 0) && <tr><td colSpan="3" className="p-8 text-center text-slate-500">No classes added yet.</td></tr>}
                                 </tbody>
                             </table>
                         </div>
@@ -246,7 +431,7 @@
         };
 
         const StudentManager = ({ db, setDb }) => {
-            const [mode, setMode] = useState('single'); // single or bulk
+            const [mode, setMode] = useState('single'); 
             const [name, setName] = useState('');
             const [roll, setRoll] = useState('');
             const [classId, setClassId] = useState('');
@@ -255,7 +440,7 @@
             const addSingle = (e) => {
                 e.preventDefault();
                 if (!name || !roll || !classId) return;
-                setDb(prev => ({ ...prev, students: [...prev.students, { id: generateId(), name, rollNumber: roll, classId }] }));
+                setDb(prev => ({ ...prev, students: [...(prev.students || []), { id: generateId(), name, rollNumber: roll, classId }] }));
                 setName(''); setRoll('');
             };
 
@@ -269,7 +454,7 @@
                     return null;
                 }).filter(Boolean);
                 
-                setDb(prev => ({ ...prev, students: [...prev.students, ...newStudents] }));
+                setDb(prev => ({ ...prev, students: [...(prev.students || []), ...newStudents] }));
                 setBulkData('');
             };
 
@@ -281,37 +466,37 @@
                     <div className="grid grid-cols-3 gap-8">
                         <div className="col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                             <div className="flex bg-slate-100 p-1 rounded-lg mb-6">
-                                <button onClick={() => setMode('single')} className={`flex-1 py-1 text-sm font-medium rounded-md ${mode === 'single' ? 'bg-white shadow' : 'text-slate-500'}`}>Single</button>
-                                <button onClick={() => setMode('bulk')} className={`flex-1 py-1 text-sm font-medium rounded-md ${mode === 'bulk' ? 'bg-white shadow' : 'text-slate-500'}`}>Bulk CSV</button>
+                                <button onClick={() => setMode('single')} className={`flex-1 py-1 text-sm font-medium rounded-md transition-colors ${mode === 'single' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Single</button>
+                                <button onClick={() => setMode('bulk')} className={`flex-1 py-1 text-sm font-medium rounded-md transition-colors ${mode === 'bulk' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Bulk CSV</button>
                             </div>
 
                             {mode === 'single' ? (
                                 <form onSubmit={addSingle} className="space-y-4">
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Select Class</label>
-                                        <select value={classId} onChange={e => setClassId(e.target.value)} className="w-full p-2 border rounded-lg" required>
+                                        <select value={classId} onChange={e => setClassId(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required>
                                             <option value="">-- Choose Class --</option>
-                                            {db.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                            {(db.classes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                         </select>
                                     </div>
-                                    <div><label className="block text-sm font-medium text-slate-700 mb-1">Student Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border rounded-lg" required /></div>
-                                    <div><label className="block text-sm font-medium text-slate-700 mb-1">Roll Number</label><input type="number" value={roll} onChange={e => setRoll(e.target.value)} className="w-full p-2 border rounded-lg" required /></div>
-                                    <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700">Add Student</button>
+                                    <div><label className="block text-sm font-medium text-slate-700 mb-1">Student Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required /></div>
+                                    <div><label className="block text-sm font-medium text-slate-700 mb-1">Roll Number</label><input type="number" value={roll} onChange={e => setRoll(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required /></div>
+                                    <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">Add Student</button>
                                 </form>
                             ) : (
                                 <form onSubmit={addBulk} className="space-y-4">
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Select Class</label>
-                                        <select value={classId} onChange={e => setClassId(e.target.value)} className="w-full p-2 border rounded-lg" required>
+                                        <select value={classId} onChange={e => setClassId(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required>
                                             <option value="">-- Choose Class --</option>
-                                            {db.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                            {(db.classes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                         </select>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Paste CSV Data (Name, RollNumber)</label>
-                                        <textarea value={bulkData} onChange={e => setBulkData(e.target.value)} className="w-full p-2 border rounded-lg h-32 font-mono text-sm" placeholder="John Doe, 1001&#10;Jane Smith, 1002" required></textarea>
+                                        <textarea value={bulkData} onChange={e => setBulkData(e.target.value)} className="w-full p-2 border rounded-lg h-32 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="John Doe, 1001&#10;Jane Smith, 1002" required></textarea>
                                     </div>
-                                    <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700">Import Students</button>
+                                    <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">Import Students</button>
                                 </form>
                             )}
                         </div>
@@ -326,17 +511,17 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {db.students.map(s => (
+                                    {(db.students || []).map(s => (
                                         <tr key={s.id} className="border-b last:border-0 hover:bg-slate-50">
                                             <td className="p-4 font-mono text-slate-600">{s.rollNumber}</td>
                                             <td className="p-4 font-medium">{s.name}</td>
-                                            <td className="p-4 text-slate-600">{db.classes.find(c => c.id === s.classId)?.name || 'Unknown'}</td>
+                                            <td className="p-4 text-slate-600">{(db.classes || []).find(c => c.id === s.classId)?.name || 'Unknown'}</td>
                                             <td className="p-4 text-right">
-                                                <button onClick={() => deleteStudent(s.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Icon name="Trash" size={16}/></button>
+                                                <button onClick={() => deleteStudent(s.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Icon name="Trash" size={16}/></button>
                                             </td>
                                         </tr>
                                     ))}
-                                    {db.students.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-500">No students added yet.</td></tr>}
+                                    {(!db.students || db.students.length === 0) && <tr><td colSpan="4" className="p-8 text-center text-slate-500">No students added yet.</td></tr>}
                                 </tbody>
                             </table>
                         </div>
@@ -351,8 +536,8 @@
             const createNewExam = () => {
                 const newExam = {
                     id: generateId(),
-                    name: 'New Exam ' + (db.exams.length + 1),
-                    classId: db.classes[0]?.id || '',
+                    name: 'New Exam ' + ((db.exams || []).length + 1),
+                    classId: db.classes?.[0]?.id || '',
                     date: new Date().toISOString().split('T')[0],
                     templateConfig: {
                         rollDigits: 4,
@@ -360,9 +545,9 @@
                             { id: generateId(), type: 'MCQ', count: 10, options: 4, startNumber: 1 }
                         ]
                     },
-                    answerKey: {} // e.g., { 'q-1': 'A', 'q-2': 'B', ... }
+                    answerKey: {} 
                 };
-                setDb(prev => ({ ...prev, exams: [...prev.exams, newExam] }));
+                setDb(prev => ({ ...prev, exams: [...(prev.exams || []), newExam] }));
                 setEditingExamId(newExam.id);
             };
 
@@ -380,30 +565,29 @@
                 <div>
                     <div className="flex justify-between items-center mb-6">
                         <h2 className="text-2xl font-bold text-slate-800">Manage Exams & Templates</h2>
-                        <button onClick={createNewExam} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2">
+                        <button onClick={createNewExam} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
                             <Icon name="FileText" size={18}/> Create Exam
                         </button>
                     </div>
 
                     <div className="grid grid-cols-3 gap-6">
-                        {db.exams.map(exam => (
+                        {(db.exams || []).map(exam => (
                             <div key={exam.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
                                 <h3 className="text-xl font-bold mb-1">{exam.name}</h3>
-                                <p className="text-slate-500 text-sm mb-4">Class: {db.classes.find(c => c.id === exam.classId)?.name || 'Unassigned'} • Date: {exam.date}</p>
+                                <p className="text-slate-500 text-sm mb-4">Class: {(db.classes || []).find(c => c.id === exam.classId)?.name || 'Unassigned'} • Date: {exam.date}</p>
                                 
                                 <div className="mt-auto flex gap-2">
-                                    <button onClick={() => setEditingExamId(exam.id)} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-200 text-sm text-center">Edit & Template</button>
-                                    <button onClick={() => deleteExam(exam.id)} className="px-3 bg-red-50 text-red-500 rounded-lg hover:bg-red-100"><Icon name="Trash" size={16}/></button>
+                                    <button onClick={() => setEditingExamId(exam.id)} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-200 text-sm text-center transition-colors">Edit</button>
+                                    <button onClick={() => deleteExam(exam.id)} className="px-3 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors"><Icon name="Trash" size={16}/></button>
                                 </div>
                             </div>
                         ))}
-                        {db.exams.length === 0 && <div className="col-span-3 text-center p-12 bg-white rounded-2xl border border-slate-200 text-slate-500">No exams created yet.</div>}
+                        {(!db.exams || db.exams.length === 0) && <div className="col-span-3 text-center p-12 bg-white rounded-2xl border border-slate-200 text-slate-500">No exams created yet.</div>}
                     </div>
                 </div>
             );
         };
 
-        // --- TEMPLATE EDITOR & VIEWER COMPONENT ---
         const TemplateEditor = ({ exam, db, setDb, onBack }) => {
             const [localExam, setLocalExam] = useState(exam);
 
@@ -441,32 +625,19 @@
                 });
             };
 
-            const exportJPEG = () => {
-                const el = document.getElementById('printable-template');
-                html2canvas(el, { scale: 3 }).then(canvas => {
-                    const link = document.createElement('a');
-                    link.download = `${localExam.name}_OMR.jpg`;
-                    link.href = canvas.toDataURL('image/jpeg', 1.0);
-                    link.click();
-                });
-            };
-
-            const printTemplate = () => window.print();
-
             return (
                 <div className="flex gap-8">
-                    {/* Controls Sidebar */}
                     <div className="w-80 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-y-auto max-h-[85vh]">
-                        <button onClick={onBack} className="text-sm font-medium text-slate-500 hover:text-slate-800 mb-6 flex items-center gap-1">&larr; Back to Exams</button>
+                        <button onClick={onBack} className="text-sm font-medium text-slate-500 hover:text-slate-800 mb-6 flex items-center gap-1 transition-colors">&larr; Back to Exams</button>
                         
                         <h3 className="font-bold text-lg mb-4">Exam Settings</h3>
                         <div className="space-y-4 mb-8">
-                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Exam Name</label><input type="text" value={localExam.name} onChange={e => updateExam({name: e.target.value})} className="w-full p-2 border rounded-lg text-sm" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Exam Name</label><input type="text" value={localExam.name} onChange={e => updateExam({name: e.target.value})} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" /></div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Assign Class</label>
-                                <select value={localExam.classId} onChange={e => updateExam({classId: e.target.value})} className="w-full p-2 border rounded-lg text-sm">
+                                <select value={localExam.classId} onChange={e => updateExam({classId: e.target.value})} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
                                     <option value="">-- Choose --</option>
-                                    {db.classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    {(db.classes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                             </div>
                             <div>
@@ -479,7 +650,7 @@
                         <div className="space-y-4 flex-1">
                             {localExam.templateConfig.sections.map((sec, idx) => (
                                 <div key={sec.id} className="p-3 border rounded-lg bg-slate-50 relative">
-                                    <button onClick={() => removeSection(sec.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600"><Icon name="Trash" size={14}/></button>
+                                    <button onClick={() => removeSection(sec.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 transition-colors"><Icon name="Trash" size={14}/></button>
                                     <p className="font-bold text-sm mb-2">{sec.type} Section</p>
                                     <div className="flex items-center gap-2">
                                         <label className="text-xs text-slate-600">Count:</label>
@@ -487,41 +658,34 @@
                                             const newSecs = [...localExam.templateConfig.sections];
                                             newSecs[idx].count = parseInt(e.target.value) || 1;
                                             updateExam({templateConfig: {...localExam.templateConfig, sections: newSecs}});
-                                        }} className="w-16 p-1 border rounded text-xs" />
+                                        }} className="w-16 p-1 border rounded text-xs outline-none focus:ring-2 focus:ring-blue-500" />
                                     </div>
                                 </div>
                             ))}
                             <div className="flex gap-2">
-                                <button onClick={() => addSection('MCQ')} className="flex-1 bg-white border border-slate-300 text-slate-700 py-1 rounded text-xs font-medium hover:bg-slate-50">+ MCQ</button>
-                                <button onClick={() => addSection('T/F')} className="flex-1 bg-white border border-slate-300 text-slate-700 py-1 rounded text-xs font-medium hover:bg-slate-50">+ T/F</button>
-                                <button onClick={() => addSection('Supply')} className="flex-1 bg-white border border-slate-300 text-slate-700 py-1 rounded text-xs font-medium hover:bg-slate-50">+ Supply</button>
+                                <button onClick={() => addSection('MCQ')} className="flex-1 bg-white border border-slate-300 text-slate-700 py-1 rounded text-xs font-medium hover:bg-slate-50 transition-colors">+ MCQ</button>
+                                <button onClick={() => addSection('T/F')} className="flex-1 bg-white border border-slate-300 text-slate-700 py-1 rounded text-xs font-medium hover:bg-slate-50 transition-colors">+ T/F</button>
                             </div>
                         </div>
 
                         <div className="mt-8 pt-4 border-t space-y-2">
-                            <button onClick={printTemplate} className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 flex justify-center items-center gap-2"><Icon name="Printer" size={16}/> Print OMR</button>
-                            <div className="flex gap-2">
-                                <button onClick={exportPDF} className="flex-1 bg-slate-800 text-white py-2 rounded-lg font-medium hover:bg-slate-900 text-sm flex justify-center items-center gap-1"><Icon name="Download" size={14}/> PDF</button>
-                                <button onClick={exportJPEG} className="flex-1 bg-slate-800 text-white py-2 rounded-lg font-medium hover:bg-slate-900 text-sm flex justify-center items-center gap-1"><Icon name="Download" size={14}/> JPEG</button>
-                            </div>
+                            <button onClick={() => window.print()} className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 flex justify-center items-center gap-2 transition-colors"><Icon name="Printer" size={16}/> Print OMR</button>
+                            <button onClick={exportPDF} className="w-full bg-slate-800 text-white py-2 rounded-lg font-medium hover:bg-slate-900 text-sm flex justify-center items-center gap-1 transition-colors"><Icon name="Download" size={14}/> PDF Export</button>
                         </div>
                     </div>
 
-                    {/* Preview Area */}
                     <div className="flex-1 bg-slate-200 rounded-2xl flex justify-center items-start overflow-auto p-8 border border-slate-300 shadow-inner">
                         <div id="printable-template" className="bg-white shadow-2xl">
-                            <OMRSheet config={localExam.templateConfig} title={localExam.name} classNameName={db.classes.find(c => c.id === localExam.classId)?.name} />
+                            <OMRSheet config={localExam.templateConfig} title={localExam.name} classNameName={(db.classes || []).find(c => c.id === localExam.classId)?.name} />
                         </div>
                     </div>
                 </div>
             );
         };
 
-        // --- OMR SHEET RENDERER (Used for preview, export, and scan mapping) ---
         const OMRSheet = ({ config, title, classNameName, hideAnswers = true, answerData = {} }) => {
             return (
                 <div className="omr-template flex flex-col" id="omr-template-calibration">
-                    {/* Header */}
                     <div className="flex justify-between items-start mb-4 border-b-2 border-black pb-2">
                         <div className="flex-1">
                             <h1 className="text-xl font-black uppercase leading-tight">{title || 'Exam Title'}</h1>
@@ -532,13 +696,12 @@
                             </div>
                         </div>
                         
-                        {/* Vertical Roll Number Grid */}
                         <div className="ml-4 pl-4 border-l-2 border-black">
                             <p className="text-[10px] font-bold text-center mb-1">ROLL NO.</p>
                             <div className="flex gap-1 justify-center">
                                 {Array.from({ length: config.rollDigits }).map((_, colIdx) => (
                                     <div key={`roll-col-${colIdx}`} className="flex flex-col items-center gap-[2px]">
-                                        <div className="w-4 h-4 border border-black mb-1"></div> {/* Writable box */}
+                                        <div className="w-4 h-4 border border-black mb-1"></div>
                                         {Array.from({ length: 10 }).map((_, num) => {
                                             const isFilled = answerData.roll && answerData.roll[colIdx] === num;
                                             return (
@@ -553,7 +716,6 @@
                         </div>
                     </div>
 
-                    {/* Body - Questions */}
                     <div className="flex-1 flex flex-wrap gap-x-6 gap-y-4 content-start overflow-hidden">
                         {config.sections.map(sec => (
                             <div key={sec.id} className="min-w-[120px]">
@@ -561,7 +723,6 @@
                                 <div className="space-y-[3px]">
                                     {Array.from({ length: sec.count }).map((_, qIdx) => {
                                         const qNum = sec.startNumber + qIdx;
-                                        
                                         if (sec.type === 'Supply') {
                                             return (
                                                 <div key={`q-${qNum}`} className="flex items-end gap-2 mb-2">
@@ -570,19 +731,15 @@
                                                 </div>
                                             );
                                         }
-
                                         const labels = sec.type === 'MCQ' ? ['A', 'B', 'C', 'D', 'E'].slice(0, sec.options) : ['T', 'F'];
-                                        
                                         return (
                                             <div key={`q-${qNum}`} className="flex items-center gap-1">
                                                 <span className="text-[10px] font-bold w-4 text-right">{qNum}.</span>
                                                 <div className="flex gap-1">
-                                                    {labels.map((lbl, optIdx) => {
+                                                    {labels.map((lbl) => {
                                                         const isFilled = answerData.answers && answerData.answers[`q-${qNum}`] === lbl;
                                                         return (
-                                                            <div key={`opt-${lbl}`} className={`omr-bubble ${isFilled ? 'filled' : ''}`} data-type="q" data-q={qNum} data-val={lbl}>
-                                                                {lbl}
-                                                            </div>
+                                                            <div key={`opt-${lbl}`} className={`omr-bubble ${isFilled ? 'filled' : ''}`} data-type="q" data-q={qNum} data-val={lbl}>{lbl}</div>
                                                         );
                                                     })}
                                                 </div>
@@ -594,7 +751,6 @@
                         ))}
                     </div>
                     
-                    {/* Footer instructions */}
                     <div className="mt-auto text-center border-t border-black pt-1">
                         <p className="text-[8px] font-bold">Please shade circles completely. Use black ink. Do not fold the paper.</p>
                     </div>
@@ -602,17 +758,64 @@
             );
         };
 
-
-        // --- SCANNER COMPONENT ---
         const Scanner = ({ db, setDb }) => {
             const [selectedExamId, setSelectedExamId] = useState('');
+            const [scanMode, setScanMode] = useState('upload'); // 'upload' or 'camera'
+            
             const [imageSrc, setImageSrc] = useState(null);
             const [scanResult, setScanResult] = useState(null);
             const [isScanning, setIsScanning] = useState(false);
             
-            // Reference to hidden template for coordinate mapping
             const hiddenTemplateRef = useRef(null);
             const canvasRef = useRef(null);
+            const videoRef = useRef(null);
+
+            // Clean up camera on unmount or switch mode
+            const stopCamera = () => {
+                if (videoRef.current && videoRef.current.srcObject) {
+                    videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+                    videoRef.current.srcObject = null;
+                }
+            };
+
+            useEffect(() => {
+                return () => stopCamera();
+            }, []);
+
+            useEffect(() => {
+                if (scanMode === 'upload') {
+                    stopCamera();
+                } else if (scanMode === 'camera' && !imageSrc) {
+                    startCamera();
+                }
+            }, [scanMode, imageSrc]);
+
+            const startCamera = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: 'environment' } // Prefer rear camera on mobile
+                    });
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                    }
+                } catch (err) {
+                    console.error("Camera error:", err);
+                    alert("Unable to access camera. Please check your browser permissions.");
+                    setScanMode('upload');
+                }
+            };
+
+            const capturePhoto = () => {
+                if (videoRef.current) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = videoRef.current.videoWidth;
+                    canvas.height = videoRef.current.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+                    setImageSrc(canvas.toDataURL('image/jpeg'));
+                    stopCamera();
+                }
+            };
 
             const handleFileChange = (e) => {
                 const file = e.target.files[0];
@@ -633,7 +836,6 @@
                 const exam = db.exams.find(e => e.id === selectedExamId);
                 const templateConfig = exam.templateConfig;
 
-                // 1. Get reference coordinates from our beautifully hidden template DOM
                 const calibContainer = hiddenTemplateRef.current.querySelector('#omr-template-calibration');
                 const calibRect = calibContainer.getBoundingClientRect();
                 const bubbles = calibContainer.querySelectorAll('.omr-bubble');
@@ -641,11 +843,10 @@
                 const expectedCoords = Array.from(bubbles).map(b => {
                     const br = b.getBoundingClientRect();
                     return {
-                        type: b.dataset.type, // 'roll' or 'q'
+                        type: b.dataset.type,
                         col: b.dataset.col,
                         val: b.dataset.val,
                         q: b.dataset.q,
-                        // Calculate relative percentage position (0.0 to 1.0) inside the 5x7 box
                         rx: (br.left - calibRect.left) / calibRect.width,
                         ry: (br.top - calibRect.top) / calibRect.height,
                         rw: br.width / calibRect.width,
@@ -653,7 +854,6 @@
                     };
                 });
 
-                // 2. Draw uploaded image to canvas
                 const img = new Image();
                 img.onload = () => {
                     const cvs = canvasRef.current;
@@ -665,7 +865,6 @@
                     const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
                     const pixels = imgData.data;
 
-                    // Helper to get average darkness of a region
                     const getDarkness = (rx, ry, rw, rh) => {
                         const startX = Math.floor(rx * cvs.width);
                         const startY = Math.floor(ry * cvs.height);
@@ -677,9 +876,7 @@
                         for (let y = startY; y < startY + h; y++) {
                             for (let x = startX; x < startX + w; x++) {
                                 const i = (y * cvs.width + x) * 4;
-                                // Grayscale value (R+G+B)/3
                                 const brightness = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
-                                // Convert to darkness (0=white, 255=black)
                                 totalDarkness += (255 - brightness);
                                 count++;
                             }
@@ -687,43 +884,33 @@
                         return count > 0 ? totalDarkness / count : 0;
                     };
 
-                    // 3. Analyze Bubbles
                     const rawResults = expectedCoords.map(c => ({
                         ...c,
                         darkness: getDarkness(c.rx, c.ry, c.rw, c.rh)
                     }));
 
-                    // 4. Determine filled bubbles (relative maximum darkness per group)
                     const parsedRoll = {};
                     const parsedAnswers = {};
 
-                    // Process Roll Number columns
                     for (let col = 0; col < templateConfig.rollDigits; col++) {
                         const colBubbles = rawResults.filter(r => r.type === 'roll' && parseInt(r.col) === col);
                         const darkest = colBubbles.reduce((prev, curr) => (curr.darkness > prev.darkness ? curr : prev), {darkness: 0});
-                        if (darkest.darkness > 50) { // arbitrary threshold to avoid empty scans
-                            parsedRoll[col] = parseInt(darkest.val);
-                        }
+                        if (darkest.darkness > 50) parsedRoll[col] = parseInt(darkest.val);
                     }
 
-                    // Process Questions
                     const allQNums = [...new Set(rawResults.filter(r => r.type === 'q').map(r => r.q))];
                     allQNums.forEach(qNum => {
                         const qBubbles = rawResults.filter(r => r.type === 'q' && r.q === qNum);
                         const darkest = qBubbles.reduce((prev, curr) => (curr.darkness > prev.darkness ? curr : prev), {darkness: 0});
-                        if (darkest.darkness > 50) {
-                            parsedAnswers[`q-${qNum}`] = darkest.val;
-                        }
+                        if (darkest.darkness > 50) parsedAnswers[`q-${qNum}`] = darkest.val;
                     });
 
-                    // Construct final Roll Number string
                     let finalRollStr = '';
                     for (let i = 0; i < templateConfig.rollDigits; i++) {
                         finalRollStr += (parsedRoll[i] !== undefined ? parsedRoll[i] : '?');
                     }
 
-                    // Identify Student
-                    const studentMatch = db.students.find(s => s.rollNumber === finalRollStr);
+                    const studentMatch = (db.students || []).find(s => s.rollNumber === finalRollStr);
 
                     setScanResult({
                         roll: finalRollStr,
@@ -746,41 +933,54 @@
                     answers: scanResult.answers,
                     timestamp: new Date().toISOString()
                 };
-                setDb(prev => ({ ...prev, submissions: [...prev.submissions, newSub] }));
+                setDb(prev => ({ ...prev, submissions: [...(prev.submissions || []), newSub] }));
                 setScanResult(null);
                 setImageSrc(null);
+                
+                if(scanMode === 'camera') startCamera(); // Restart camera automatically for next scan
+
                 alert("Scan saved successfully!");
             };
 
-            const activeExam = db.exams.find(e => e.id === selectedExamId);
+            const activeExam = (db.exams || []).find(e => e.id === selectedExamId);
 
             return (
                 <div className="flex gap-8">
-                    {/* Instructions & File Upload */}
                     <div className="w-80 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-fit">
                         <h2 className="text-xl font-bold mb-4">Scan & Grade</h2>
                         
+                        <div className="flex bg-slate-100 p-1 rounded-lg mb-6">
+                            <button onClick={() => { setScanMode('upload'); setImageSrc(null); setScanResult(null); }} className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-sm font-medium rounded-md transition-colors ${scanMode === 'upload' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:bg-slate-200'}`}>
+                                <Icon name="Upload" size={16} /> Upload
+                            </button>
+                            <button onClick={() => { setScanMode('camera'); setImageSrc(null); setScanResult(null); }} className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-sm font-medium rounded-md transition-colors ${scanMode === 'camera' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:bg-slate-200'}`}>
+                                <Icon name="Camera" size={16} /> Camera
+                            </button>
+                        </div>
+
                         <div className="space-y-4 mb-6">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Select Exam to Grade</label>
-                                <select value={selectedExamId} onChange={e => setSelectedExamId(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                                <select value={selectedExamId} onChange={e => setSelectedExamId(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
                                     <option value="">-- Choose Exam --</option>
-                                    {db.exams.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                                    {(db.exams || []).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                                 </select>
                             </div>
 
-                            {selectedExamId && (
-                                <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
-                                    <strong>Important:</strong> Ensure the uploaded image is tightly cropped to the thick black borders of the printed OMR sheet for accurate reading.
+                            {scanMode === 'upload' && (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Upload OMR Image</label>
+                                    <input type="file" accept="image/*" onChange={handleFileChange} disabled={!selectedExamId} className="w-full text-sm border p-2 rounded-lg file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
                                 </div>
                             )}
 
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Upload OMR Image</label>
-                                <input type="file" accept="image/*" onChange={handleFileChange} disabled={!selectedExamId} className="w-full text-sm border p-2 rounded-lg file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-                            </div>
+                            {scanMode === 'camera' && imageSrc && (
+                                <button onClick={() => { setImageSrc(null); setScanResult(null); startCamera(); }} className="w-full bg-slate-100 text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-200 transition-colors flex justify-center items-center gap-2">
+                                    <Icon name="RefreshCw" size={16}/> Retake Photo
+                                </button>
+                            )}
 
-                            <button onClick={processScan} disabled={!imageSrc || isScanning} className="w-full bg-slate-900 text-white py-2 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 flex justify-center items-center gap-2">
+                            <button onClick={processScan} disabled={!imageSrc || isScanning} className="w-full bg-slate-900 text-white py-2 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 flex justify-center items-center gap-2 transition-colors">
                                 {isScanning ? 'Processing...' : <><Icon name="Scan" size={16}/> Process Scan</>}
                             </button>
                         </div>
@@ -804,26 +1004,35 @@
                                         <span className="font-bold">{Object.keys(scanResult.answers).length}</span>
                                     </div>
                                 </div>
-                                <button onClick={saveResult} className="w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700">Save Record</button>
+                                <button onClick={saveResult} className="w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition-colors">Save Record</button>
                             </div>
                         )}
                     </div>
 
-                    {/* Image Preview & Hidden Calibration DOM */}
-                    <div className="flex-1 bg-slate-200 rounded-2xl border border-slate-300 shadow-inner overflow-hidden flex flex-col items-center justify-center p-4 relative min-h-[500px]">
-                        {imageSrc ? (
-                            <div className="relative inline-block border-4 border-black shadow-xl" style={{ maxHeight: '100%', maxWidth: '100%' }}>
-                                <img src={imageSrc} alt="Scanned OMR" className="max-w-full max-h-[80vh] object-contain block" />
+                    <div className="flex-1 bg-slate-200 rounded-2xl border border-slate-300 shadow-inner overflow-hidden flex flex-col items-center justify-center relative min-h-[500px]">
+                        
+                        {scanMode === 'camera' && !imageSrc ? (
+                            <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">
+                                <video ref={videoRef} autoPlay playsInline className="max-w-full max-h-full object-contain"></video>
+                                {selectedExamId ? (
+                                    <button onClick={capturePhoto} className="absolute bottom-8 bg-blue-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2 border-2 border-white">
+                                        <Icon name="Camera" /> Capture Document
+                                    </button>
+                                ) : (
+                                    <div className="absolute bottom-8 bg-slate-800/80 text-white px-6 py-2 rounded-full font-medium shadow-lg backdrop-blur text-sm">
+                                        Select an Exam first to enable capture
+                                    </div>
+                                )}
+                            </div>
+                        ) : imageSrc ? (
+                            <div className="relative inline-block border-4 border-black shadow-xl my-4" style={{ maxHeight: '90%', maxWidth: '90%' }}>
+                                <img src={imageSrc} alt="Scanned OMR" className="max-w-full max-h-[80vh] object-contain block bg-white" />
                                 <canvas ref={canvasRef} className="hidden"></canvas>
                             </div>
                         ) : (
-                            <p className="text-slate-400 font-medium">Select an exam and upload an image to begin.</p>
+                            <p className="text-slate-400 font-medium p-4 text-center">Select an exam and upload an image to begin.</p>
                         )}
                         
-                        {/* HIDDEN TEMPLATE FOR CALIBRATION 
-                          We render the template perfectly off-screen to extract exact percentage coordinates
-                          of where bubbles *should* be relative to the bounding box.
-                        */}
                         {activeExam && (
                             <div style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', top: '-10000px', left: '-10000px' }} ref={hiddenTemplateRef}>
                                 <OMRSheet config={activeExam.templateConfig} title="CALIB" />
