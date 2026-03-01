@@ -19,7 +19,6 @@
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         
         .omr-template {
-            /* Width and height are now injected dynamically via inline styles */
             background-color: white;
             color: black;
             border: 4px solid black;
@@ -32,7 +31,6 @@
         }
 
         .omr-bubble {
-            /* Dynamic sizing based on CSS variables calculated by React */
             width: var(--bubble-size, 14px);
             height: var(--bubble-size, 14px);
             font-size: var(--font-size, 8px);
@@ -72,7 +70,7 @@
     <script type="text/babel">
         // ==========================================
         // 🔧 CONFIGURATION
-        // Paste your Google Apps Script URL here:
+        // Paste your deployed Google Apps Script URL here!
         // ==========================================
         const GAS_URL = "https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec";
         
@@ -249,7 +247,7 @@
 
             const handleCloudSave = async () => {
                 if (!isCloudConfigured) {
-                    alert("No Cloud URL configured in the code. Data is only saved locally.");
+                    alert("⚠️ No Google Apps Script URL configured!\n\nPlease open the code and paste your deployed Code.gs URL into the GAS_URL variable to enable Google Drive saving.");
                     return;
                 }
                 setIsSyncing(true);
@@ -260,12 +258,12 @@
                     });
                     const data = await res.json();
                     if (data.status === 'success') {
-                        alert("Successfully Synced to Google Drive!");
+                        alert("✅ Successfully saved all data to Google Drive!");
                     } else {
-                        alert("Error syncing: " + data.message);
+                        alert("❌ Error saving: " + data.message);
                     }
                 } catch (err) {
-                    alert("Network error. Could not reach the server.");
+                    alert("❌ Network error. Could not reach the Google Apps Script server.");
                 }
                 setIsSyncing(false);
             };
@@ -276,12 +274,12 @@
 
             const renderView = () => {
                 switch (currentView) {
-                    case 'dashboard': return <Dashboard db={db} user={user} />;
+                    case 'dashboard': return <Dashboard db={db} user={user} onSave={handleCloudSave} isSyncing={isSyncing} />;
                     case 'classes': return <ClassManager db={db} setDb={setDb} />;
                     case 'students': return <StudentManager db={db} setDb={setDb} />;
                     case 'exams': return <ExamManager db={db} setDb={setDb} setCurrentView={setCurrentView} />;
                     case 'scanner': return <Scanner db={db} setDb={setDb} />;
-                    default: return <Dashboard db={db} user={user} />;
+                    default: return <Dashboard db={db} user={user} onSave={handleCloudSave} isSyncing={isSyncing} />;
                 }
             };
 
@@ -324,18 +322,24 @@
                                 <div className="overflow-hidden">
                                     <p className="text-sm font-bold truncate">{user.username}</p>
                                     <p className="text-xs text-slate-400 truncate flex items-center gap-1">
-                                        {isCloudConfigured ? <><span className="w-2 h-2 rounded-full bg-green-500"></span> Cloud Sync On</> : <><span className="w-2 h-2 rounded-full bg-orange-500"></span> Local Only</>}
+                                        {isCloudConfigured ? <><span className="w-2 h-2 rounded-full bg-green-500"></span> Drive Linked</> : <><span className="w-2 h-2 rounded-full bg-orange-500"></span> Local Only</>}
                                     </p>
                                 </div>
                             </div>
                             
-                            <div className="flex gap-2">
-                                {isCloudConfigured && (
-                                    <button onClick={handleCloudSave} disabled={isSyncing} className="flex-1 flex justify-center items-center gap-1 bg-green-600 hover:bg-green-700 text-white py-1.5 rounded-lg text-xs font-bold transition">
-                                        {isSyncing ? 'Syncing...' : <><Icon name="Cloud" size={14} /> Sync</>}
-                                    </button>
-                                )}
-                                <button onClick={handleLogout} className="flex-1 flex justify-center items-center gap-1 bg-slate-700 hover:bg-red-600 text-white py-1.5 rounded-lg text-xs font-bold transition">
+                            <div className="flex flex-col gap-2">
+                                <button 
+                                    onClick={handleCloudSave} 
+                                    disabled={isSyncing} 
+                                    className="w-full flex justify-center items-center gap-2 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-bold transition shadow-md disabled:opacity-50"
+                                >
+                                    {isSyncing ? (
+                                        <><Icon name="RefreshCw" size={16} className="animate-spin" /> Saving...</>
+                                    ) : (
+                                        <><Icon name="Cloud" size={16} /> Save to Drive</>
+                                    )}
+                                </button>
+                                <button onClick={handleLogout} className="w-full flex justify-center items-center gap-1 bg-slate-700 hover:bg-red-600 text-white py-1.5 rounded-lg text-xs font-bold transition">
                                     <Icon name="LogOut" size={14} /> Logout
                                 </button>
                             </div>
@@ -352,10 +356,27 @@
 
         // --- COMPONENTS ---
 
-        const Dashboard = ({ db, user }) => (
+        const Dashboard = ({ db, user, onSave, isSyncing }) => (
             <div className="animate-fade-in">
-                <h2 className="text-3xl font-black text-slate-800 mb-2">Welcome, {user.username}!</h2>
-                <p className="text-slate-500 mb-8">Here's the overview of your classes and evaluation data.</p>
+                <div className="flex justify-between items-start mb-8">
+                    <div>
+                        <h2 className="text-3xl font-black text-slate-800 mb-2">Welcome, {user.username}!</h2>
+                        <p className="text-slate-500">Here's the overview of your classes and evaluation data.</p>
+                    </div>
+                    
+                    <button 
+                        onClick={onSave} 
+                        disabled={isSyncing} 
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold transition flex items-center gap-2 shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        {isSyncing ? (
+                            <><Icon name="RefreshCw" size={20} className="animate-spin" /> Saving Data...</>
+                        ) : (
+                            <><Icon name="Save" size={20} /> Save to Google Drive</>
+                        )}
+                    </button>
+                </div>
+
                 <div className="grid grid-cols-4 gap-6">
                     <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                         <div className="p-4 bg-blue-100 text-blue-600 rounded-xl"><Icon name="Book" size={24}/></div>
@@ -543,7 +564,7 @@
                     classId: db.classes?.[0]?.id || '',
                     date: new Date().toISOString().split('T')[0],
                     templateConfig: {
-                        paperSize: 'Letter', // Default to Short paper size
+                        paperSize: 'Letter',
                         rollDigits: 4,
                         instructions: 'Please shade circles completely. Use black or blue ink. Do not fold or tear the paper.',
                         sections: [
@@ -596,7 +617,6 @@
         const TemplateEditor = ({ exam, db, setDb, onBack }) => {
             const [localExam, setLocalExam] = useState(exam);
 
-            // Ensure compatibility with old data missing paperSize
             if (!localExam.templateConfig.paperSize) {
                 localExam.templateConfig.paperSize = 'Letter';
             }
@@ -628,7 +648,6 @@
             const exportPDF = () => {
                 const el = document.getElementById('printable-template');
                 
-                // Get Paper Dimensions based on selection
                 const dims = {
                     'Letter': { w: 8.5, h: 11, format: 'letter' },
                     'Legal': { w: 8.5, h: 14, format: 'legal' },
@@ -735,8 +754,6 @@
         };
 
         const OMRSheet = ({ config, title, classNameName, hideAnswers = true, answerData = {} }) => {
-            
-            // 1. Configure the Paper Size Dimensions
             const paperDims = {
                 'Letter': { w: 8.5, h: 11 },
                 'Legal': { w: 8.5, h: 14 },
@@ -744,16 +761,12 @@
             };
             const pSize = paperDims[config.paperSize || 'Letter'];
 
-            // 2. Aggregate counts and complexity
             const totalQuestions = config.sections.reduce((acc, sec) => acc + sec.count, 0) || 1;
             const maxOptions = Math.max(...config.sections.map(s => s.options || 4), 2);
 
-            // 3. Dynamic Auto-Adjustment Calculation Engine
-            // This tests different column configurations to maximize the bubble size for optimal legibility
             let bestBubbleSize = 0;
             let bestCols = 1;
             
-            // Available space estimation (Header takes about 3.5 inches, padding 1 inch total)
             const availHeightPx = (pSize.h - 3.5) * 96; 
             const availWidthPx = (pSize.w - 1.0) * 96; 
             
@@ -762,20 +775,18 @@
                 const maxRowHeight = availHeightPx / itemsPerCol;
                 const maxColWidth = availWidthPx / c;
                 
-                // Bubble size is constrained by Row Height and Column Width (accounting for Option Count + Question Number spacing)
                 const widthConstraint = (maxColWidth - 40) / maxOptions; 
-                const heightConstraint = maxRowHeight * 0.7; // 70% of row height to allow breathing room
+                const heightConstraint = maxRowHeight * 0.7;
                 
-                const bSize = Math.min(widthConstraint, heightConstraint, 18); // Max 18px bubble size
+                const bSize = Math.min(widthConstraint, heightConstraint, 18);
                 if (bSize > bestBubbleSize) {
                     bestBubbleSize = bSize;
                     bestCols = c;
                 }
             }
             
-            // Ensure minimum legibility limits
-            const finalBubbleSize = Math.max(bestBubbleSize, 7); // Floor at 7px for extreme cramming (150Q / 10 Options)
-            const fontSize = Math.max(finalBubbleSize * 0.55, 6); // Font size scales relative to bubble size
+            const finalBubbleSize = Math.max(bestBubbleSize, 7);
+            const fontSize = Math.max(finalBubbleSize * 0.55, 6);
 
             return (
                 <div className="omr-template flex flex-col" id="omr-template-calibration" style={{
@@ -784,7 +795,6 @@
                     '--bubble-size': `${finalBubbleSize}px`,
                     '--font-size': `${fontSize}px`
                 }}>
-                    {/* Header Section */}
                     <div className="flex justify-between items-start mb-2 border-b-2 border-black pb-2 shrink-0">
                         <div className="flex-1">
                             <h1 className="text-xl font-black uppercase leading-tight">{title || 'Exam Title'}</h1>
@@ -815,7 +825,6 @@
                         </div>
                     </div>
 
-                    {/* --- INSTRUCTIONS SECTION --- */}
                     {config.instructions && config.instructions.trim() !== '' && (
                         <div className="border border-black p-[4px] mb-3 bg-slate-50 shrink-0">
                             <p className="text-[9px] leading-tight">
@@ -825,7 +834,6 @@
                         </div>
                     )}
 
-                    {/* Questions Section - Auto adjusting dynamic grid */}
                     <div className="flex-1 overflow-hidden" style={{ 
                         columnCount: bestCols, 
                         columnGap: '16px', 
@@ -862,7 +870,7 @@
 
         const Scanner = ({ db, setDb }) => {
             const [selectedExamId, setSelectedExamId] = useState('');
-            const [scanMode, setScanMode] = useState('upload'); // 'upload' or 'camera'
+            const [scanMode, setScanMode] = useState('upload');
             const [isCameraOn, setIsCameraOn] = useState(false);
             
             const [imageSrc, setImageSrc] = useState(null);
@@ -950,7 +958,6 @@
                         col: b.dataset.col,
                         val: b.dataset.val,
                         q: b.dataset.q,
-                        // Relative coordinates mean they adapt automatically regardless of paper size!
                         rx: (br.left - calibRect.left) / calibRect.width,
                         ry: (br.top - calibRect.top) / calibRect.height,
                         rw: br.width / calibRect.width,
@@ -1043,7 +1050,7 @@
                 
                 if (scanMode === 'camera') startCamera(); 
 
-                alert("Scan saved successfully!");
+                alert("Scan saved locally successfully! Remember to 'Save to Google Drive' to back it up.");
             };
 
             const activeExam = (db.exams || []).find(e => e.id === selectedExamId);
@@ -1157,7 +1164,6 @@
                             <p className="text-slate-400 font-medium p-4 text-center">Select an exam and upload an image to begin.</p>
                         )}
                         
-                        {/* Hidden reference version used for proportional pixel mapping calibration */}
                         {activeExam && (
                             <div style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', top: '-10000px', left: '-10000px' }} ref={hiddenTemplateRef}>
                                 <OMRSheet config={activeExam.templateConfig} title="CALIB" />
