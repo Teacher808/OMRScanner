@@ -41,8 +41,9 @@ const Icon = ({ name, size=20, className="" }) => {
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec"; 
 
 export default function App() {
+    const defaultDb = { classes: [], students: [], exams: [], submissions: [] };
     const [user, setUser] = useState(() => safeStorageGet('sm_user', null));
-    const [db, setDb] = useState(() => safeStorageGet('sm_db', { classes: [], students: [], exams: [], submissions: [] }));
+    const [db, setDb] = useState(() => safeStorageGet('sm_db', defaultDb));
     const [syncStatus, setSyncStatus] = useState('idle');
     const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
     const [message, setMessage] = useState(null);
@@ -59,7 +60,7 @@ export default function App() {
 
     const apiCall = async (payload) => {
         if (!APP_SCRIPT_URL) {
-            setMessage({ type: 'error', text: 'Backend URL not configured.' });
+            setMessage({ type: 'error', text: 'Backend URL not configured. Please set APP_SCRIPT_URL.' });
             return null;
         }
         setSyncStatus('loading');
@@ -96,12 +97,13 @@ export default function App() {
             if (res?.status === 'success') {
                 setAuthMode('login');
                 setMessage({ type: 'success', text: 'Account created! Please log in.' });
+                e.target.reset();
             }
         } else {
             const res = await apiCall({ action: 'LOGIN', username, password });
             if (res?.status === 'success') {
                 setUser({ username, password });
-                setDb(res.data);
+                setDb(res.data || defaultDb);
                 setMessage(null);
             }
         }
@@ -118,6 +120,12 @@ export default function App() {
         if (res?.status === 'success') {
             setTimeout(() => setSyncStatus('idle'), 3000);
         }
+    };
+
+    const handleLogout = () => {
+        setUser(null);
+        setDb(defaultDb); // Clear local DB to prevent data leaks between users
+        safeStorageSet('sm_db', null);
     };
 
     if (!user) {
@@ -183,7 +191,7 @@ export default function App() {
                         <span className="capitalize">{syncStatus}</span>
                     </div>
                     
-                    <button onClick={syncToDrive} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-slate-600 hover:bg-blue-50 hover:text-blue-600 mt-4 border border-dashed border-slate-300">
+                    <button onClick={syncToDrive} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg text-sm text-slate-600 hover:bg-blue-50 hover:text-blue-600 mt-4 border border-dashed border-slate-300 transition-colors">
                         <Icon name="Refresh" size={16}/> Save to Drive
                     </button>
                 </nav>
@@ -193,7 +201,7 @@ export default function App() {
                         <p className="text-xs font-bold text-slate-800 truncate">@{user.username}</p>
                         <p className="text-[10px] text-slate-400 italic">Google Drive Sync</p>
                     </div>
-                    <button onClick={() => setUser(null)} className="w-full py-2 text-sm text-red-600 font-bold hover:bg-red-50 rounded-lg">Log Out</button>
+                    <button onClick={handleLogout} className="w-full py-2 text-sm text-red-600 font-bold hover:bg-red-50 rounded-lg transition-colors">Log Out</button>
                 </div>
             </aside>
 
@@ -207,15 +215,16 @@ export default function App() {
                         <div className="grid grid-cols-3 gap-6 text-left">
                             <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                                 <p className="text-xs font-bold text-slate-400 uppercase mb-2">Classes</p>
-                                <p className="text-4xl font-black text-slate-800">{db.classes.length}</p>
+                                {/* Added optional chaining '?.length' to prevent crashes on empty data */}
+                                <p className="text-4xl font-black text-slate-800">{db.classes?.length || 0}</p>
                             </div>
                             <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                                 <p className="text-xs font-bold text-slate-400 uppercase mb-2">Exams</p>
-                                <p className="text-4xl font-black text-slate-800">{db.exams.length}</p>
+                                <p className="text-4xl font-black text-slate-800">{db.exams?.length || 0}</p>
                             </div>
                             <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 shadow-sm">
                                 <p className="text-xs font-bold text-slate-400 uppercase mb-2">Students</p>
-                                <p className="text-4xl font-black text-slate-800">{db.students.length}</p>
+                                <p className="text-4xl font-black text-slate-800">{db.students?.length || 0}</p>
                             </div>
                         </div>
                     </div>
