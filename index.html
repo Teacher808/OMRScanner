@@ -19,7 +19,7 @@
     <!-- Authentication Section -->
     <div id="authSection" class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md">
         <h1 class="text-2xl font-bold text-blue-950 mb-2 text-center">Welcome</h1>
-        <p class="text-sm text-blue-600 mb-6 text-center">Enter your details. First-time users will be registered automatically.</p>
+        <p class="text-sm text-blue-600 mb-6 text-center">Enter your details to log in or register a new account.</p>
         
         <div class="space-y-4">
             <div>
@@ -31,9 +31,12 @@
                     class="w-full px-4 py-2 bg-white border border-blue-200 text-blue-950 placeholder-gray-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
             
-            <div class="pt-2">
-                <button id="loginBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium transition-colors flex justify-center items-center h-10 shadow-md shadow-blue-600/30">
-                    <span>Log In / Register</span>
+            <div class="flex gap-2 pt-2">
+                <button id="loginBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium transition-colors flex justify-center items-center h-10 shadow-md shadow-blue-600/30">
+                    <span>Log In</span>
+                </button>
+                <button id="signupBtn" class="flex-1 bg-white hover:bg-blue-50 text-blue-600 border border-blue-200 py-2 rounded-lg font-medium transition-colors flex justify-center items-center h-10">
+                    <span>Register</span>
                 </button>
             </div>
             
@@ -211,27 +214,24 @@
             if(!username || !password) return showStatus("Please enter a username and password", true);
             
             try {
-                // 1. Attempt to log in normally
                 const result = await callBackend({ action: 'login', username, password }, 'loginBtn');
                 showAppScreen(result);
             } catch(e) {
-                // 2. If login fails due to invalid credentials, attempt auto-registration
-                if (e.message.includes("Invalid username or password")) {
-                    try {
-                        const signupResult = await callBackend({ action: 'signup', username, password }, 'loginBtn');
-                        showStatus("First time login: Account created successfully!");
-                        showAppScreen(signupResult);
-                    } catch(signupError) {
-                        // 3. If signup fails because the username already exists, it means the user just typed the wrong password
-                        if (signupError.message.includes("already registered")) {
-                            showStatus("Incorrect password for this username.", true);
-                        } else {
-                            showStatus(signupError.message.replace('Error: ', ''), true);
-                        }
-                    }
-                } else {
-                    showStatus(e.message.replace('Error: ', ''), true);
-                }
+                showStatus(e.message.replace('Error: ', ''), true);
+            }
+        };
+
+        document.getElementById('signupBtn').onclick = async () => {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if(!username || !password) return showStatus("Please enter a username and password", true);
+            
+            try {
+                const result = await callBackend({ action: 'signup', username, password }, 'signupBtn');
+                showStatus("Account created successfully!");
+                showAppScreen(result);
+            } catch(e) {
+                showStatus(e.message.replace('Error: ', ''), true);
             }
         };
 
