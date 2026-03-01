@@ -1008,7 +1008,7 @@ function SettingsPanel({ settings, updateDb }) {
           To backup images to Google Drive and records to Google Sheets, deploy the provided Google Apps Script code as a Web App and paste the URL below.
         </p>
         <div>
-          <label className="block text-sm font-medium mb-1">https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec</label>
+          <label className="block text-sm font-medium mb-1">"https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec"</label>
           <input 
             value={gasUrl} 
             onChange={e => setGasUrl(e.target.value)} 
@@ -1044,3 +1044,4 @@ function SettingsPanel({ settings, updateDb }) {
     </div>
   );
 }
+
