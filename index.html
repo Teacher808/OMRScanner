@@ -28,6 +28,8 @@
             padding: 0.2in;
             position: relative;
             margin: 0 auto;
+            display: flex;
+            flex-direction: column;
         }
 
         .omr-bubble {
@@ -73,9 +75,7 @@
         // ==========================================
         const GAS_URL = "https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec";
         
-        // Helper to check if cloud is configured
         const isCloudConfigured = GAS_URL && GAS_URL.startsWith("https://script.google.com");
-
 
         const { useState, useEffect, useRef } = React;
 
@@ -95,7 +95,10 @@
                 LogOut: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
                 Save: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
                 Camera: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>,
-                Upload: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Upload: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+                RefreshCw: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
+                Power: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>,
+                VideoOff: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M10.66 6H14a2 2 0 0 1 2 2v2.34l1 1L22 8v8l-2.08-2.08-2.58-2.58L12.76 10l-2.1-2.1z"/><path d="M2 2l20 20"/><path d="M16 16v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2.34"/></svg>
             };
             return icons[name] || null;
         };
@@ -200,7 +203,6 @@
                 </div>
             );
         };
-
 
         // --- MAIN APP COMPONENT ---
         const App = () => {
@@ -541,6 +543,7 @@
                     date: new Date().toISOString().split('T')[0],
                     templateConfig: {
                         rollDigits: 4,
+                        instructions: 'Please shade circles completely. Use black or blue ink. Do not fold or tear the paper.',
                         sections: [
                             { id: generateId(), type: 'MCQ', count: 10, options: 4, startNumber: 1 }
                         ]
@@ -644,6 +647,15 @@
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Roll Number Digits ({localExam.templateConfig.rollDigits})</label>
                                 <input type="range" min="2" max="6" value={localExam.templateConfig.rollDigits} onChange={e => updateExam({templateConfig: {...localExam.templateConfig, rollDigits: parseInt(e.target.value)}})} className="w-full" />
                             </div>
+                            
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Exam Instructions</label>
+                                <textarea 
+                                    value={localExam.templateConfig.instructions !== undefined ? localExam.templateConfig.instructions : ''} 
+                                    onChange={e => updateExam({templateConfig: {...localExam.templateConfig, instructions: e.target.value}})} 
+                                    className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none h-20" 
+                                    placeholder="Enter instructions for students to read..."></textarea>
+                            </div>
                         </div>
 
                         <h3 className="font-bold text-lg mb-4">Template Sections</h3>
@@ -652,13 +664,25 @@
                                 <div key={sec.id} className="p-3 border rounded-lg bg-slate-50 relative">
                                     <button onClick={() => removeSection(sec.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 transition-colors"><Icon name="Trash" size={14}/></button>
                                     <p className="font-bold text-sm mb-2">{sec.type} Section</p>
-                                    <div className="flex items-center gap-2">
-                                        <label className="text-xs text-slate-600">Count:</label>
-                                        <input type="number" min="1" max="50" value={sec.count} onChange={e => {
-                                            const newSecs = [...localExam.templateConfig.sections];
-                                            newSecs[idx].count = parseInt(e.target.value) || 1;
-                                            updateExam({templateConfig: {...localExam.templateConfig, sections: newSecs}});
-                                        }} className="w-16 p-1 border rounded text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs text-slate-600">Count:</label>
+                                            <input type="number" min="1" max="150" value={sec.count} onChange={e => {
+                                                const newSecs = [...localExam.templateConfig.sections];
+                                                newSecs[idx].count = parseInt(e.target.value) || 1;
+                                                updateExam({templateConfig: {...localExam.templateConfig, sections: newSecs}});
+                                            }} className="w-16 p-1 border rounded text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                                        </div>
+                                        {sec.type === 'MCQ' && (
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-xs text-slate-600">Options:</label>
+                                                <input type="number" min="2" max="10" value={sec.options || 4} onChange={e => {
+                                                    const newSecs = [...localExam.templateConfig.sections];
+                                                    newSecs[idx].options = parseInt(e.target.value) || 4;
+                                                    updateExam({templateConfig: {...localExam.templateConfig, sections: newSecs}});
+                                                }} className="w-16 p-1 border rounded text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -686,7 +710,8 @@
         const OMRSheet = ({ config, title, classNameName, hideAnswers = true, answerData = {} }) => {
             return (
                 <div className="omr-template flex flex-col" id="omr-template-calibration">
-                    <div className="flex justify-between items-start mb-4 border-b-2 border-black pb-2">
+                    {/* Header Section */}
+                    <div className="flex justify-between items-start mb-2 border-b-2 border-black pb-2 shrink-0">
                         <div className="flex-1">
                             <h1 className="text-xl font-black uppercase leading-tight">{title || 'Exam Title'}</h1>
                             <p className="text-xs font-bold mt-1">Class: {classNameName || '____________________'}</p>
@@ -716,43 +741,41 @@
                         </div>
                     </div>
 
-                    <div className="flex-1 flex flex-wrap gap-x-6 gap-y-4 content-start overflow-hidden">
+                    {/* --- INSTRUCTIONS SECTION --- */}
+                    {config.instructions && config.instructions.trim() !== '' && (
+                        <div className="border border-black p-[4px] mb-3 bg-slate-50 shrink-0">
+                            <p className="text-[9px] leading-tight">
+                                <span className="font-bold uppercase mr-1">Instructions:</span>
+                                {config.instructions}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Questions Section - Auto flowing Columns */}
+                    <div className="flex-1 overflow-hidden" style={{ columnWidth: '130px', columnGap: '16px', columnFill: 'auto' }}>
                         {config.sections.map(sec => (
-                            <div key={sec.id} className="min-w-[120px]">
-                                <h4 className="text-[10px] font-bold border-b border-black mb-1 pb-[2px]">{sec.type}</h4>
-                                <div className="space-y-[3px]">
-                                    {Array.from({ length: sec.count }).map((_, qIdx) => {
-                                        const qNum = sec.startNumber + qIdx;
-                                        if (sec.type === 'Supply') {
-                                            return (
-                                                <div key={`q-${qNum}`} className="flex items-end gap-2 mb-2">
-                                                    <span className="text-[10px] font-bold w-4 text-right">{qNum}.</span>
-                                                    <div className="flex-1 border-b border-black h-4 min-w-[80px]"></div>
-                                                </div>
-                                            );
-                                        }
-                                        const labels = sec.type === 'MCQ' ? ['A', 'B', 'C', 'D', 'E'].slice(0, sec.options) : ['T', 'F'];
-                                        return (
-                                            <div key={`q-${qNum}`} className="flex items-center gap-1">
-                                                <span className="text-[10px] font-bold w-4 text-right">{qNum}.</span>
-                                                <div className="flex gap-1">
-                                                    {labels.map((lbl) => {
-                                                        const isFilled = answerData.answers && answerData.answers[`q-${qNum}`] === lbl;
-                                                        return (
-                                                            <div key={`opt-${lbl}`} className={`omr-bubble ${isFilled ? 'filled' : ''}`} data-type="q" data-q={qNum} data-val={lbl}>{lbl}</div>
-                                                        );
-                                                    })}
-                                                </div>
+                            <React.Fragment key={sec.id}>
+                                <h4 className="text-[10px] font-bold border-b border-black mb-1.5 pb-[2px] break-after-avoid mt-2 first:mt-0" style={{ pageBreakAfter: 'avoid' }}>{sec.type} Section</h4>
+                                {Array.from({ length: sec.count }).map((_, qIdx) => {
+                                    const qNum = sec.startNumber + qIdx;
+                                    
+                                    const labels = sec.type === 'MCQ' ? ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].slice(0, sec.options || 4) : ['T', 'F'];
+                                    return (
+                                        <div key={`q-${qNum}`} className="flex items-center gap-1 mb-[5px] break-inside-avoid" style={{ pageBreakInside: 'avoid' }}>
+                                            <span className="text-[10px] font-bold w-5 text-right shrink-0">{qNum}.</span>
+                                            <div className="flex gap-[2px] flex-wrap">
+                                                {labels.map((lbl) => {
+                                                    const isFilled = answerData.answers && answerData.answers[`q-${qNum}`] === lbl;
+                                                    return (
+                                                        <div key={`opt-${lbl}`} className={`omr-bubble ${isFilled ? 'filled' : ''}`} data-type="q" data-q={qNum} data-val={lbl}>{lbl}</div>
+                                                    );
+                                                })}
                                             </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </React.Fragment>
                         ))}
-                    </div>
-                    
-                    <div className="mt-auto text-center border-t border-black pt-1">
-                        <p className="text-[8px] font-bold">Please shade circles completely. Use black ink. Do not fold the paper.</p>
                     </div>
                 </div>
             );
@@ -761,6 +784,7 @@
         const Scanner = ({ db, setDb }) => {
             const [selectedExamId, setSelectedExamId] = useState('');
             const [scanMode, setScanMode] = useState('upload'); // 'upload' or 'camera'
+            const [isCameraOn, setIsCameraOn] = useState(false);
             
             const [imageSrc, setImageSrc] = useState(null);
             const [scanResult, setScanResult] = useState(null);
@@ -770,12 +794,12 @@
             const canvasRef = useRef(null);
             const videoRef = useRef(null);
 
-            // Clean up camera on unmount or switch mode
             const stopCamera = () => {
                 if (videoRef.current && videoRef.current.srcObject) {
                     videoRef.current.srcObject.getTracks().forEach(track => track.stop());
                     videoRef.current.srcObject = null;
                 }
+                setIsCameraOn(false);
             };
 
             useEffect(() => {
@@ -785,22 +809,22 @@
             useEffect(() => {
                 if (scanMode === 'upload') {
                     stopCamera();
-                } else if (scanMode === 'camera' && !imageSrc) {
-                    startCamera();
                 }
-            }, [scanMode, imageSrc]);
+            }, [scanMode]);
 
             const startCamera = async () => {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { facingMode: 'environment' } // Prefer rear camera on mobile
+                        video: { facingMode: 'environment' }
                     });
                     if (videoRef.current) {
                         videoRef.current.srcObject = stream;
+                        setIsCameraOn(true);
                     }
                 } catch (err) {
                     console.error("Camera error:", err);
                     alert("Unable to access camera. Please check your browser permissions.");
+                    setIsCameraOn(false);
                     setScanMode('upload');
                 }
             };
@@ -813,7 +837,7 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
                     setImageSrc(canvas.toDataURL('image/jpeg'));
-                    stopCamera();
+                    stopCamera(); 
                 }
             };
 
@@ -937,7 +961,7 @@
                 setScanResult(null);
                 setImageSrc(null);
                 
-                if(scanMode === 'camera') startCamera(); // Restart camera automatically for next scan
+                if (scanMode === 'camera') startCamera(); 
 
                 alert("Scan saved successfully!");
             };
@@ -1012,16 +1036,36 @@
                     <div className="flex-1 bg-slate-200 rounded-2xl border border-slate-300 shadow-inner overflow-hidden flex flex-col items-center justify-center relative min-h-[500px]">
                         
                         {scanMode === 'camera' && !imageSrc ? (
-                            <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">
-                                <video ref={videoRef} autoPlay playsInline className="max-w-full max-h-full object-contain"></video>
-                                {selectedExamId ? (
-                                    <button onClick={capturePhoto} className="absolute bottom-8 bg-blue-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2 border-2 border-white">
-                                        <Icon name="Camera" /> Capture Document
-                                    </button>
-                                ) : (
-                                    <div className="absolute bottom-8 bg-slate-800/80 text-white px-6 py-2 rounded-full font-medium shadow-lg backdrop-blur text-sm">
-                                        Select an Exam first to enable capture
+                            <div className="relative w-full h-full bg-slate-900 flex flex-col items-center justify-center overflow-hidden">
+                                
+                                <video ref={videoRef} autoPlay playsInline className={`max-w-full max-h-full object-contain ${isCameraOn ? 'block' : 'hidden'}`}></video>
+                                
+                                {!isCameraOn && (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-slate-400 z-10">
+                                        <Icon name="VideoOff" size={48} className="opacity-50 mb-4" />
+                                        <button onClick={startCamera} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2">
+                                            Turn On Camera
+                                        </button>
+                                        <p className="text-sm mt-4 max-w-xs text-center">Enable your camera to scan OMR sheets directly from your device.</p>
                                     </div>
+                                )}
+
+                                {isCameraOn && (
+                                    <>
+                                        <button onClick={stopCamera} className="absolute top-4 right-4 bg-red-600/80 hover:bg-red-600 text-white p-3 rounded-full shadow-lg backdrop-blur transition z-20" title="Turn Off Camera">
+                                            <Icon name="Power" size={20} />
+                                        </button>
+
+                                        {selectedExamId ? (
+                                            <button onClick={capturePhoto} className="absolute bottom-8 bg-blue-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2 border-2 border-white z-20">
+                                                <Icon name="Camera" /> Capture Document
+                                            </button>
+                                        ) : (
+                                            <div className="absolute bottom-8 bg-slate-800/80 text-white px-6 py-2 rounded-full font-medium shadow-lg backdrop-blur text-sm z-20">
+                                                Select an Exam first to enable capture
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         ) : imageSrc ? (
