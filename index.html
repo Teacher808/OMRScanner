@@ -56,23 +56,16 @@
 
     <!-- Main App Section -->
     <div id="appSection" class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md hidden">
-        <div class="flex justify-between items-center mb-2">
-            <h1 class="text-2xl font-bold text-blue-950">My Tasks</h1>
-            <button id="logoutBtn" class="text-sm text-red-500 hover:text-red-600 font-medium">Logout</button>
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-blue-950">Dashboard</h1>
+            <button id="logoutBtn" class="text-sm text-red-500 hover:text-red-600 font-medium bg-red-50 px-3 py-1 rounded-md">Logout</button>
         </div>
-        <p id="userEmailDisplay" class="text-xs text-blue-500 mb-6 border-b border-blue-100 pb-4"></p>
+        <p id="userEmailDisplay" class="text-sm font-medium text-blue-600 mb-6 text-center bg-blue-50 py-3 rounded-lg border border-blue-100"></p>
         
-        <div class="flex gap-2 mb-6">
-            <input type="text" id="taskInput" placeholder="What needs to be done?" 
-                class="flex-1 px-4 py-2 bg-white border border-blue-200 text-blue-950 placeholder-gray-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button id="addTaskBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center min-w-[4rem] shadow-md shadow-blue-600/30">
-                <span>Add</span>
-            </button>
+        <div class="text-center py-8 text-gray-500">
+            <p>You have successfully logged in.</p>
+            <p class="text-sm mt-2">Add your app content here.</p>
         </div>
-
-        <ul id="taskList" class="space-y-3">
-            <!-- Tasks will be injected here via JavaScript -->
-        </ul>
     </div>
 
     <script>
@@ -84,7 +77,6 @@
 
         // Current user state
         let currentUser = null;
-        let currentTasks = [];
 
         // DOM Elements
         const authSection = document.getElementById('authSection');
@@ -92,8 +84,6 @@
         const usernameInput = document.getElementById('usernameInput');
         const passwordInput = document.getElementById('passwordInput');
         const userEmailDisplay = document.getElementById('userEmailDisplay');
-        const taskInput = document.getElementById('taskInput');
-        const taskList = document.getElementById('taskList');
 
         // Helper: Show status messages
         const showStatus = (msg, isError = false) => {
@@ -143,63 +133,15 @@
 
         // --- View & Render Logic ---
 
-        const renderTasks = () => {
-            taskList.innerHTML = '';
-            currentTasks.sort((a, b) => a.createdAt - b.createdAt).forEach((task) => {
-                const li = document.createElement('li');
-                li.className = 'flex items-center justify-between p-3 bg-blue-50 border border-blue-100 rounded-lg group shadow-sm';
-                
-                const span = document.createElement('span');
-                span.className = 'text-blue-950 break-all';
-                span.textContent = task.text;
-
-                const delBtn = document.createElement('button');
-                delBtn.className = 'text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-600 ml-2 flex-shrink-0';
-                delBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>';
-                
-                delBtn.onclick = async () => {
-                    const originalContent = li.innerHTML;
-                    li.innerHTML = '<div class="flex justify-center w-full"><div class="loader"></div></div>';
-                    try {
-                        await callBackend({ action: 'deleteTask', taskId: task.id });
-                        currentTasks = currentTasks.filter(t => t.id !== task.id);
-                        renderTasks();
-                    } catch(e) {
-                        li.innerHTML = originalContent; // Revert if failed
-                        showStatus(e.message.replace('Error: ', ''), true);
-                    }
-                };
-
-                li.appendChild(span);
-                li.appendChild(delBtn);
-                taskList.appendChild(li);
-            });
-        };
-
-        const loadTasks = async () => {
-            taskList.innerHTML = '<div class="flex justify-center p-4"><div class="loader border-blue-600"></div></div>';
-            try {
-                const result = await callBackend({ action: 'getTasks', userId: currentUser.userId });
-                currentTasks = result.tasks || [];
-                renderTasks();
-            } catch (e) {
-                taskList.innerHTML = '<div class="text-red-500 text-center text-sm">Failed to load tasks.</div>';
-                showStatus(e.message.replace('Error: ', ''), true);
-            }
-        };
-
         const showAppScreen = (user) => {
             currentUser = user;
             authSection.classList.add('hidden');
             appSection.classList.remove('hidden');
             userEmailDisplay.textContent = `Logged in as: ${user.username}`;
-            loadTasks();
         };
 
         const logout = () => {
             currentUser = null;
-            currentTasks = [];
-            taskList.innerHTML = '';
             appSection.classList.add('hidden');
             authSection.classList.remove('hidden');
             usernameInput.value = '';
@@ -243,24 +185,6 @@
                 showStatus(e.message.replace('Error: ', ''), true);
             }
         };
-
-        document.getElementById('addTaskBtn').onclick = async () => {
-            const text = taskInput.value.trim();
-            if (!text) return;
-
-            try {
-                const result = await callBackend({ action: 'addTask', userId: currentUser.userId, text }, 'addTaskBtn');
-                currentTasks.push(result.task);
-                taskInput.value = '';
-                renderTasks();
-            } catch(e) {
-                showStatus(e.message.replace('Error: ', ''), true);
-            }
-        };
-
-        taskInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') document.getElementById('addTaskBtn').click();
-        });
 
         document.getElementById('logoutBtn').onclick = logout;
 
