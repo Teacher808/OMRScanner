@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
-
-// --- CONSTANTS ---
-// PASTE YOUR GOOGLE APP SCRIPT DEPLOYMENT URL HERE
-const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec"; 
+import { Cloud, User, RefreshCw, Check, AlertTriangle, Lock } from 'lucide-react';
 
 // Safe LocalStorage Helpers to prevent crashes in iframes/sandboxes
 const safeStorageGet = (key, defaultValue) => {
@@ -29,15 +26,19 @@ const safeStorageSet = (key, value) => {
 
 const Icon = ({ name, size=20, className="" }) => {
     const icons = {
-        Cloud: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />,
-        User: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />,
-        Refresh: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />,
-        Check: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />,
-        Alert: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />,
-        Lock: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        Cloud: <Cloud size={size} className={className} />,
+        User: <User size={size} className={className} />,
+        Refresh: <RefreshCw size={size} className={className} />,
+        Check: <Check size={size} className={className} />,
+        Alert: <AlertTriangle size={size} className={className} />,
+        Lock: <Lock size={size} className={className} />
     };
-    return <svg className={className} width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor">{icons[name] || icons.Check}</svg>;
+    return icons[name] || <Check size={size} className={className} />;
 };
+
+// --- CONSTANTS ---
+// PASTE YOUR GOOGLE APP SCRIPT DEPLOYMENT URL HERE
+const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec"; 
 
 export default function App() {
     const [user, setUser] = useState(() => safeStorageGet('sm_user', null));
@@ -175,7 +176,7 @@ export default function App() {
                 <nav className="p-4 flex-1 space-y-1">
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2">Sync Status</div>
                     <div className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium ${syncStatus === 'error' ? 'text-red-600 bg-red-50' : 'text-slate-600 bg-slate-50'}`}>
-                        {syncStatus === 'loading' && <Icon name="Refresh" className="animate-spin text-blue-500" size={18}/>}
+                        {syncStatus === 'loading' && <Icon name="Refresh" className="animate-spin text-slate-800" size={18}/>}
                         {syncStatus === 'success' && <Icon name="Check" className="text-green-500" size={18}/>}
                         {syncStatus === 'error' && <Icon name="Alert" size={18}/>}
                         {syncStatus === 'idle' && <Icon name="Cloud" size={18} className="text-slate-400"/>}
@@ -190,7 +191,7 @@ export default function App() {
                 <div className="p-4 border-t border-slate-100">
                     <div className="px-4 mb-3">
                         <p className="text-xs font-bold text-slate-800 truncate">@{user.username}</p>
-                        <p className="text-[10px] text-slate-400 italic">Multi-user Session</p>
+                        <p className="text-[10px] text-slate-400 italic">Google Drive Sync</p>
                     </div>
                     <button onClick={() => setUser(null)} className="w-full py-2 text-sm text-red-600 font-bold hover:bg-red-50 rounded-lg">Log Out</button>
                 </div>
