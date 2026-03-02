@@ -419,21 +419,27 @@
         const bubbleLabels = config.type === 'truefalse' ? ['T', 'F'] : Array.from({length: config.choices}, (_, i) => String.fromCharCode(65 + i));
 
         const BubbleRow = ({ num }) => (
-          <div className={`flex items-center ${bubbleGapClass} ${textSizeClass} ${rowGapClass} break-inside-avoid pr-2`}>
-            <span className="w-5 text-right font-bold mr-0.5">{num}.</span>
+          <div className={`flex items-center ${bubbleGapClass} ${textSizeClass} ${rowGapClass} break-inside-avoid pr-1`}>
+            <span className="w-5 text-right font-bold mr-0.5 shrink-0">{num}.</span>
             {bubbleLabels.map(l => (
               <div key={l} className={`${bubbleSizeClass} rounded-full border border-black flex items-center justify-center font-bold shrink-0`}>{l}</div>
             ))}
           </div>
         );
 
-        // Core Requirement: Divide array perfectly into halves/thirds (ensuring each column fits easily)
-        const maxRowsAllowed = isSmall ? 25 : 45;
-        // Enforce at least 2 columns so items never exceed half the total
-        const minCols = Math.max(2, Math.ceil(config.itemCount / maxRowsAllowed));
-        const itemsPerCol = Math.ceil(config.itemCount / minCols);
+        // Advanced Column Logic: evenly distribute into 3 to 6 columns
+        let numCols = 3;
+        if (config.itemCount >= 40) numCols = 4;
+        if (config.itemCount >= 80) numCols = 5;
+        if (config.itemCount >= 120) numCols = 6;
+        
+        // Safety bounds check to avoid bubbles overflowing off the screen horizontally if they use 7-10 choices
+        if (config.choices > 5 && numCols > 4) numCols = 4;
+        if (config.choices > 7 && numCols > 3) numCols = 3;
 
-        const columnArrays = Array.from({ length: minCols }, (_, colIndex) => {
+        const itemsPerCol = Math.ceil(config.itemCount / numCols);
+
+        const columnArrays = Array.from({ length: numCols }, (_, colIndex) => {
           return Array.from({ length: itemsPerCol }, (_, rowIndex) => {
             const itemNum = colIndex * itemsPerCol + rowIndex + 1;
             return itemNum <= config.itemCount ? itemNum : null;
@@ -513,8 +519,11 @@
                     </div>
                   </div>
 
-                  {/* Questions Grid - strictly partitioned into multiple columns ensuring max items per col < half items */}
-                  <div className="flex w-full flex-1 justify-between gap-x-2 mt-2">
+                  {/* Questions Grid - exactly 3 to 6 columns evenly distributed */}
+                  <div 
+                    className="w-full flex-1 mt-4 grid gap-x-2"
+                    style={{ gridTemplateColumns: `repeat(${numCols}, minmax(0, 1fr))` }}
+                  >
                     {columnArrays.map((col, cIdx) => (
                       <div key={cIdx} className="flex flex-col">
                         {col.map(num => <BubbleRow key={num} num={num} />)}
