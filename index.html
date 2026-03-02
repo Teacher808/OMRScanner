@@ -13,15 +13,18 @@
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     
-    /* Print Styles specifically for the OMR Sheet */
+    /* Strict WYSIWYG Print Styles for the OMR Sheet */
     @media print {
+      @page { size: 8.5in 11in; margin: 0; }
+      body { margin: 0; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body * { visibility: hidden; }
       #omr-print-area, #omr-print-area * { visibility: visible; }
       #omr-print-area {
         position: absolute; left: 0; top: 0; 
         width: 8.5in; height: 11in;
-        background: white; padding: 0.5in;
-        color: black;
+        margin: 0;
+        box-shadow: none !important;
+        border: none !important;
       }
       .no-print { display: none !important; }
     }
@@ -33,7 +36,7 @@
   <script type="text/babel" data-type="module">
     import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.2.0';
     import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
-    import { Camera, Settings, CheckCircle, Users, AlertTriangle, RefreshCw, BookOpen, Trash2, UserPlus, LogOut, Lock, User, FileText, Printer, Upload, UploadCloud, Edit3, Save, Eye } from 'https://esm.sh/lucide-react@0.263.1';
+    import { Camera, Settings, CheckCircle, Users, AlertTriangle, RefreshCw, BookOpen, Trash2, UserPlus, LogOut, Lock, User, FileText, Printer, Upload, UploadCloud, Edit3, Save, Eye, BarChart } from 'https://esm.sh/lucide-react@0.263.1';
 
     const generateSafeId = () => {
       if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -43,42 +46,35 @@
     function App() {
       const [activeTab, setActiveTab] = useState('exams');
       
-      // Hardcoded Web App URL - Only 1 Google Drive repository is used
       const gasUrl = 'https://script.google.com/macros/s/AKfycbzTsgZnj4EACnV9RWjTXSLYgjd3mLgirXqpfO02EpREdtfkbvNFceseAbxiy1NGMxBJAQ/exec';
       
-      // Auth State
       const [currentUser, setCurrentUser] = useState(null);
       const [authMode, setAuthMode] = useState('login');
       const [authForm, setAuthForm] = useState({ username: '', password: '' });
 
-      // Data State
       const [classes, setClasses] = useState([]);
       const [students, setStudents] = useState([]);
       const [exams, setExams] = useState([]);
       const [scores, setScores] = useState([]);
       
-      // UI States
       const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
       const [isLoading, setIsLoading] = useState(false);
 
-      // Management Forms
       const [newClassName, setNewClassName] = useState('');
       const [manageClassId, setManageClassId] = useState('');
       const [studentForm, setStudentForm] = useState({ name: '', rollNo: '' });
       const [bulkInput, setBulkInput] = useState('');
       const [showBulkAdd, setShowBulkAdd] = useState(false);
 
-      // Exam Forms
       const [examForm, setExamForm] = useState({
         title: '', classId: '', rollDigits: 2, itemCount: 50, choices: 4, type: 'multiple', instructions: 'Shade the circle completely black.'
       });
-      const [viewingExam, setViewingExam] = useState(null); // Determines if generating print view or key editor
+      const [viewingExam, setViewingExam] = useState(null);
 
-      // Scanner State
       const [scanExamId, setScanExamId] = useState('');
       const [uploadedImage, setUploadedImage] = useState(null);
       const fileInputRef = useRef(null);
-      const [mockScore, setMockScore] = useState(null); // Used to simulate OMR read
+      const [mockScore, setMockScore] = useState(null); 
 
       useEffect(() => {
         try {
@@ -183,7 +179,7 @@
         const lines = bulkInput.trim().split('\n');
         const newStudents = [];
         lines.forEach(line => {
-          const parts = line.split(/[\t,]+/); // Split by tab or comma
+          const parts = line.split(/[\t,]+/); 
           if (parts.length >= 2) {
             newStudents.push({
               id: generateSafeId(), classId: manageClassId,
@@ -219,7 +215,7 @@
         const newExam = {
           id: generateSafeId(), classId: examForm.classId, title: examForm.title,
           config: { rollDigits: Number(examForm.rollDigits), itemCount: Number(examForm.itemCount), choices: Number(examForm.choices), type: examForm.type, instructions: examForm.instructions },
-          answerKey: {} // Empty initially
+          answerKey: {}
         };
         try {
           await callGAS('saveExam', { userId: currentUser.userId, exam: newExam });
@@ -263,24 +259,39 @@
 
       const processMockOMR = () => {
         setIsLoading(true);
-        // Simulate OpenCV processing delay
         setTimeout(() => {
           setIsLoading(false);
           const activeExam = exams.find(e => e.id === scanExamId);
           if(!activeExam) return;
           
-          // Randomly pick a student from the class to mock detection
           const classStudents = students.filter(s => s.classId === activeExam.classId);
           const randomStudent = classStudents.length > 0 ? classStudents[Math.floor(Math.random() * classStudents.length)] : { rollNo: '01', name: 'Unknown' };
           
-          // Generate a fake score
-          const fakeScore = Math.floor(Math.random() * activeExam.config.itemCount);
+          const answerKey = activeExam.answerKey || {};
+          let scoreCount = 0;
+          const rawData = {};
+          
+          // Accurately mock generating responses based on the established answer key
+          for(let i = 1; i <= activeExam.config.itemCount; i++) {
+             // 70% chance to mock a correct answer
+             const isCorrect = Math.random() > 0.3;
+             if(isCorrect && answerKey[i]) {
+                 rawData[i] = answerKey[i];
+                 scoreCount++;
+             } else {
+                 // pick a random wrong answer or leave blank
+                 const choices = activeExam.config.type === 'truefalse' ? ['T', 'F'] : Array.from({length: activeExam.config.choices}, (_, idx) => String.fromCharCode(65 + idx));
+                 const wrongChoices = choices.filter(c => c !== answerKey[i]);
+                 rawData[i] = wrongChoices.length > 0 ? wrongChoices[Math.floor(Math.random() * wrongChoices.length)] : '';
+             }
+          }
           
           setMockScore({
             studentRoll: randomStudent.rollNo,
             studentName: randomStudent.name,
-            score: fakeScore,
-            total: activeExam.config.itemCount
+            score: scoreCount,
+            total: activeExam.config.itemCount,
+            rawData: rawData
           });
         }, 1500);
       };
@@ -297,7 +308,7 @@
           studentId: student ? student.id : 'Unknown',
           score: mockScore.score,
           total: mockScore.total,
-          rawData: {} // would contain individual item responses
+          rawData: mockScore.rawData
         };
 
         try {
@@ -311,7 +322,6 @@
 
       // --- UI RENDERERS ---
 
-      // Pre-login View
       if (!currentUser) {
         return (
           <div className="flex flex-col min-h-screen bg-gray-50 text-gray-800 font-sans max-w-md mx-auto shadow-2xl justify-center p-6">
@@ -338,17 +348,16 @@
         );
       }
 
-      // If rendering the PRINT VIEW (OMR Template)
+      // If rendering the PRINT VIEW (OMR Template WYSIWYG)
       if (viewingExam && viewingExam.mode === 'print') {
         const { config, title } = viewingExam.exam;
         const cls = classes.find(c => c.id === viewingExam.exam.classId);
         
-        // Setup bubbles based on type
         const bubbleLabels = config.type === 'truefalse' ? ['T', 'F'] : 
                              Array.from({length: config.choices}, (_, i) => String.fromCharCode(65 + i));
 
         const BubbleRow = ({ num }) => (
-          <div className="flex items-center gap-1.5 text-[11px] mb-2 break-inside-avoid w-auto min-w-[130px] pr-4">
+          <div className="flex items-center gap-1.5 text-[11px] mb-1.5 break-inside-avoid w-[130px] pr-2">
             <span className="w-5 text-right font-bold mr-1">{num}.</span>
             {bubbleLabels.map(l => (
               <div key={l} className="w-5 h-5 rounded-full border border-black flex items-center justify-center text-[9px] font-bold shrink-0">{l}</div>
@@ -357,16 +366,17 @@
         );
 
         return (
-          <div className="min-h-screen bg-gray-300 p-4">
-            <div className="max-w-4xl mx-auto mb-4 flex justify-between no-print items-center bg-white p-4 rounded-lg shadow">
-              <p className="text-gray-600">Print or Save as PDF. Set paper size to <strong>Letter (8.5x11)</strong>, margins to None.</p>
+          <div className="min-h-screen bg-gray-300 p-2 sm:p-4 overflow-x-auto">
+            <div className="max-w-4xl mx-auto mb-4 flex justify-between no-print items-center bg-white p-4 rounded-lg shadow sticky top-0 z-50 min-w-[8.5in]">
+              <p className="text-gray-600">Preview exactly matches print. Set paper size to <strong>Letter (8.5x11)</strong>, margins to None.</p>
               <div className="flex gap-2">
                 <button onClick={() => setViewingExam(null)} className="px-4 py-2 bg-gray-200 rounded-lg font-medium">Close</button>
                 <button onClick={() => window.print()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium flex gap-2 items-center"><Printer size={16}/> Print</button>
               </div>
             </div>
 
-            <div id="omr-print-area" className="mx-auto border border-gray-300 shadow-xl" style={{width: '8.5in', height: '11in', padding: '0.4in'}}>
+            {/* Strict Preview Container matching Letter Size exactly */}
+            <div id="omr-print-area" className="bg-white mx-auto shadow-2xl relative" style={{ width: '8.5in', height: '11in', boxSizing: 'border-box', padding: '0.4in' }}>
                <div className="border-4 border-black p-4 h-full flex flex-col relative">
                   {/* Anchor corners for scanning alignment */}
                   <div className="absolute top-0 left-0 w-6 h-6 bg-black"></div>
@@ -381,14 +391,16 @@
 
                   <div className="flex gap-6 mb-6 shrink-0">
                     {/* Student Info Box */}
-                    <div className="flex-1 border-2 border-black p-3">
-                      <div className="flex border-b border-black pb-1 mb-2">
-                        <span className="font-bold w-16">Name:</span> <div className="flex-1"></div>
+                    <div className="flex-1 border-2 border-black p-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex border-b border-black pb-1 mb-3 mt-1">
+                          <span className="font-bold w-16">Name:</span> <div className="flex-1"></div>
+                        </div>
+                        <div className="flex border-b border-black pb-1 mb-2">
+                          <span className="font-bold w-16">Date:</span> <div className="flex-1"></div>
+                        </div>
                       </div>
-                      <div className="flex border-b border-black pb-1 mb-2">
-                        <span className="font-bold w-16">Date:</span> <div className="flex-1"></div>
-                      </div>
-                      <div className="text-xs italic mt-2">
+                      <div className="text-xs italic mt-2 border-t border-dashed border-gray-400 pt-2">
                         <strong>Instructions:</strong> {config.instructions}
                       </div>
                     </div>
@@ -399,7 +411,7 @@
                       <div className="flex gap-1">
                         {Array.from({length: config.rollDigits}).map((_, colIdx) => (
                           <div key={colIdx} className="flex flex-col items-center gap-1">
-                            <div className="w-5 h-6 border border-black mb-1"></div> {/* Write-in box */}
+                            <div className="w-5 h-6 border border-black mb-1"></div>
                             {Array.from({length: 10}).map((_, rowIdx) => (
                               <div key={rowIdx} className="w-5 h-5 rounded-full border border-black flex items-center justify-center text-[10px] font-bold">{rowIdx}</div>
                             ))}
@@ -409,8 +421,8 @@
                     </div>
                   </div>
 
-                  {/* Questions Grid using explicit height constraint to force auto-wrap column distribution */}
-                  <div className="flex flex-col flex-wrap content-start gap-x-2 gap-y-0.5 w-full" style={{ maxHeight: '7.5in' }}>
+                  {/* Questions Grid - forced into continuous columns using explicit height and flex column wrap */}
+                  <div className="flex flex-col flex-wrap content-start gap-x-6 w-full flex-1" style={{ maxHeight: '7in' }}>
                     {Array.from({length: config.itemCount}).map((_, i) => <BubbleRow key={i} num={i+1} /> )}
                   </div>
                </div>
@@ -453,6 +465,71 @@
           </div>
         );
       }
+
+      // If rendering ITEM ANALYSIS
+      if (viewingExam && viewingExam.mode === 'analysis') {
+        const { exam } = viewingExam;
+        const examScores = scores.filter(s => s.examId === exam.id);
+        const totalStudents = examScores.length;
+        
+        return (
+           <div className="flex flex-col h-screen bg-gray-50 text-gray-800 font-sans max-w-md mx-auto shadow-2xl relative">
+              <header className="bg-indigo-600 text-white p-4 shadow-md flex justify-between items-center">
+                 <h1 className="font-bold tracking-tight text-lg">Item Analysis</h1>
+                 <button onClick={() => setViewingExam(null)} className="text-xs bg-indigo-800 px-3 py-1 rounded text-white font-medium">Back</button>
+              </header>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="bg-white p-4 rounded-lg shadow-sm border text-center">
+                   <h2 className="text-lg font-bold text-gray-800">{exam.title}</h2>
+                   <p className="text-sm text-gray-500">Total Answer Sheets Scanned: {totalStudents}</p>
+                </div>
+                
+                {totalStudents === 0 ? (
+                   <div className="text-center text-gray-500 py-8">No sheets scanned yet.</div>
+                ) : (
+                   <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-bold text-gray-400 px-1 mb-1">
+                        <span>ITEM / KEY</span>
+                        <span>% CORRECT</span>
+                      </div>
+                      {Array.from({length: exam.config.itemCount}).map((_, i) => {
+                         const itemNum = i + 1;
+                         const correctAns = exam.answerKey[itemNum];
+                         let correctCount = 0;
+                         
+                         examScores.forEach(sc => {
+                            let raw = {};
+                            try { raw = typeof sc.rawData === 'string' ? JSON.parse(sc.rawData) : (sc.rawData || {}); } catch(e) {}
+                            if (raw[itemNum] === correctAns) correctCount++;
+                         });
+                         
+                         const percentage = ((correctCount / totalStudents) * 100).toFixed(1);
+                         
+                         return (
+                            <div key={itemNum} className="bg-white p-3 rounded-lg shadow-sm border flex items-center justify-between">
+                               <div className="flex items-center gap-3">
+                                  <span className="font-bold text-gray-700 w-5">{itemNum}.</span>
+                                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded font-mono">Key: <strong className="text-indigo-600">{correctAns || '?'}</strong></span>
+                               </div>
+                               <div className="flex items-center gap-3">
+                                  <div className="w-20 bg-gray-200 rounded-full h-2">
+                                    <div className={`h-2 rounded-full ${percentage < 50 ? 'bg-red-500' : percentage < 75 ? 'bg-yellow-400' : 'bg-green-500'}`} style={{width: `${percentage}%`}}></div>
+                                  </div>
+                                  <span className={`text-xs font-bold w-10 text-right ${percentage < 50 ? 'text-red-600' : percentage < 75 ? 'text-yellow-600' : 'text-green-600'}`}>{percentage}%</span>
+                               </div>
+                            </div>
+                         );
+                      })}
+                   </div>
+                )}
+              </div>
+           </div>
+        );
+      }
+
+      // Scanner Security Logic Check
+      const activeScanExam = scanExamId ? exams.find(e => e.id === scanExamId) : null;
+      const hasAnswerKey = activeScanExam && activeScanExam.answerKey && Object.keys(activeScanExam.answerKey).length > 0;
 
       // MAIN APP NAVIGATION
       return (
@@ -534,12 +611,15 @@
                            </div>
                            <button onClick={() => handleDeleteExam(ex.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
                         </div>
-                        <div className="flex gap-2 mt-1 border-t pt-2">
-                          <button onClick={() => setViewingExam({mode: 'print', exam: ex})} className="flex-1 flex items-center justify-center gap-1 text-xs bg-indigo-50 text-indigo-700 py-2 rounded font-medium hover:bg-indigo-100">
-                            <Printer size={14}/> Print OMR
+                        <div className="grid grid-cols-3 gap-1 mt-1 border-t pt-2">
+                          <button onClick={() => setViewingExam({mode: 'print', exam: ex})} className="flex flex-col items-center justify-center gap-1 text-[10px] bg-indigo-50 text-indigo-700 py-2 rounded font-medium hover:bg-indigo-100">
+                            <Printer size={16}/> Print OMR
                           </button>
-                          <button onClick={() => setViewingExam({mode: 'key', exam: ex})} className="flex-1 flex items-center justify-center gap-1 text-xs bg-green-50 text-green-700 py-2 rounded font-medium hover:bg-green-100">
-                            <Edit3 size={14}/> Answer Key
+                          <button onClick={() => setViewingExam({mode: 'key', exam: ex})} className="flex flex-col items-center justify-center gap-1 text-[10px] bg-green-50 text-green-700 py-2 rounded font-medium hover:bg-green-100">
+                            <Edit3 size={16}/> Answer Key
+                          </button>
+                          <button onClick={() => setViewingExam({mode: 'analysis', exam: ex})} className="flex flex-col items-center justify-center gap-1 text-[10px] bg-blue-50 text-blue-700 py-2 rounded font-medium hover:bg-blue-100">
+                            <BarChart size={16}/> Item Analysis
                           </button>
                         </div>
                       </div>
@@ -623,7 +703,17 @@
                     </select>
                  </div>
 
-                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center space-y-4">
+                 {scanExamId && !hasAnswerKey && (
+                    <div className="bg-orange-50 text-orange-800 p-4 rounded-xl border border-orange-200 flex items-start gap-3">
+                       <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+                       <div className="text-sm">
+                         <strong>Answer Key Required!</strong><br />
+                         You cannot scan papers until you set the correct answers for this exam. Please go to the <strong>Exams</strong> tab and click <strong>Answer Key</strong>.
+                       </div>
+                    </div>
+                 )}
+
+                 <div className={`bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center space-y-4 ${scanExamId && !hasAnswerKey ? 'opacity-50 pointer-events-none' : ''}`}>
                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">OMR Vision Engine</h3>
                     
                     {!uploadedImage ? (
@@ -636,7 +726,6 @@
                            <UploadCloud size={36} className="mb-2"/>
                            <span className="text-sm font-medium">Upload Image</span>
                         </button>
-                        {/* Hidden file input that natively handles both camera capture and gallery depending on OS */}
                         <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload} />
                       </div>
                     ) : (
