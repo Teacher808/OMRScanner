@@ -1,1382 +1,619 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OMR ScanMaster System</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & ReactDOM -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <!-- Babel for JSX -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- jsPDF & html2canvas for Exporting -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+import React, { useState, useEffect } from 'react';
+import { Camera, Settings, CloudLightning, CheckCircle, Users, AlertTriangle, CloudOff, RefreshCw, Smartphone, BookOpen, Trash2, UserPlus, LogOut, Lock, User } from 'lucide-react';
 
-    <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        
-        /* The template now uses strict absolute pixel dimensions to prevent layout shifts */
-        .omr-template {
-            background-color: white;
-            color: black;
-            border: 4px solid black;
-            box-sizing: border-box;
-            padding: 0.4in;
-            position: relative;
-            margin: 0 auto;
-            display: flex;
-            flex-direction: column;
-        }
+const generateSafeId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+};
 
-        /* Strict bubble styling to guarantee perfect circles */
-        .omr-bubble {
-            width: var(--bubble-size, 14px) !important;
-            height: var(--bubble-size, 14px) !important;
-            min-width: var(--bubble-size, 14px) !important;
-            min-height: var(--bubble-size, 14px) !important;
-            max-width: var(--bubble-size, 14px) !important;
-            max-height: var(--bubble-size, 14px) !important;
-            font-size: var(--font-size, 8px) !important;
-            border: 1px solid black;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            color: #ccc;
-            margin: 1px;
-            background-color: transparent;
-            flex-shrink: 0;
-            transition: background-color 0.2s, color 0.2s;
-            box-sizing: border-box !important;
-            aspect-ratio: 1 / 1 !important;
-            line-height: 1 !important;
-            padding: 0 !important;
-        }
+export default function App() {
+  const [activeTab, setActiveTab] = useState('scan');
+  
+  // INTEGRATE YOUR URL HERE: Replace the string below with your actual Google Apps Script Web App URL
+  const [gasUrl, setGasUrl] = useState('https://script.google.com/macros/s/AKfycbz9Y2vFk6MjoPSobkyn4WH50hethMnYA7dsmyUURmAY2apcspro4IpGOonQRyGiMvus/exec');
+  
+  // Auth State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [authForm, setAuthForm] = useState({ username: '', password: '' });
 
-        .omr-bubble.filled {
-            background-color: black !important;
-            color: black !important;
-        }
+  // Data State
+  const [classes, setClasses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [selectedClass, setSelectedClass] = useState('');
+  const [unsyncedRecords, setUnsyncedRecords] = useState([]);
+  
+  // UI States
+  const [manualInput, setManualInput] = useState('');
+  const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
+  const [isLoading, setIsLoading] = useState(false);
 
-        .omr-bubble.interactive {
-            cursor: pointer;
-        }
+  // Management Forms
+  const [newClassName, setNewClassName] = useState('');
+  const [manageClassId, setManageClassId] = useState('');
+  const [studentForm, setStudentForm] = useState({ name: '', rollNo: '' });
 
-        .omr-bubble.interactive:hover:not(.filled) {
-            background-color: #e2e8f0;
-            color: #64748b;
-        }
+  useEffect(() => {
+    try {
+      const savedUrl = localStorage.getItem('gasUrl');
+      if (savedUrl) setGasUrl(savedUrl);
+      
+      const savedUser = localStorage.getItem('currentUser');
+      if (savedUser) setCurrentUser(JSON.parse(savedUser));
 
-        /* Enforce absolute printing settings */
-        @page {
-            margin: 0;
-            size: auto;
-        }
-        @media print {
-            body * { visibility: hidden; }
-            .print-container, .print-container * { visibility: visible; }
-            .print-container {
-                position: absolute;
-                left: 0;
-                top: 0;
-                margin: 0 !important;
-                transform: scale(1) !important;
-                page-break-after: always;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+      const savedRecords = localStorage.getItem('unsyncedRecords');
+      if (savedRecords) setUnsyncedRecords(JSON.parse(savedRecords) || []);
+    } catch (e) {
+      console.error("Error loading local storage:", e);
+    }
+  }, []);
 
-    <script type="text/babel">
-        // ==========================================
-        // 🔧 CONFIGURATION
-        // Paste your deployed Google Apps Script URL here!
-        // ==========================================
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbylttvR-9sCjWOc5cQ7nMZLYJaAOgONB6G0wfWL2ZiVmjj-md9vtWX6e6zL84U_6kDE/exec";
-        
-        const isCloudConfigured = GAS_URL && GAS_URL.startsWith("https://script.google.com");
+  useEffect(() => {
+    localStorage.setItem('unsyncedRecords', JSON.stringify(unsyncedRecords));
+  }, [unsyncedRecords]);
 
-        const { useState, useEffect, useRef } = React;
+  // Fetch data whenever user logs in or app starts with a user
+  useEffect(() => {
+    if (currentUser && gasUrl) {
+      fetchData();
+    }
+  }, [currentUser]);
 
-        // --- ICONS ---
-        const Icon = ({ name, size = 20, className = "" }) => {
-            const icons = {
-                Home: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-                Users: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
-                Book: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>,
-                FileText: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>,
-                Scan: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>,
-                Trash: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
-                Download: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-                Printer: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
-                Lock: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
-                Cloud: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>,
-                LogOut: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
-                Save: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
-                Camera: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>,
-                Upload: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
-                RefreshCw: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
-                Power: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>,
-                VideoOff: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M10.66 6H14a2 2 0 0 1 2 2v2.34l1 1L22 8v8l-2.08-2.08-2.58-2.58L12.76 10l-2.1-2.1z"/><path d="M2 2l20 20"/><path d="M16 16v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2.34"/></svg>,
-                Key: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>,
-                CheckCircle: <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            };
-            return icons[name] || null;
-        };
+  const showStatus = (text, type = 'success') => {
+    setStatusMsg({ text, type });
+    setTimeout(() => setStatusMsg({ text: '', type: '' }), 4500);
+  };
 
-        const generateId = () => Math.random().toString(36).substr(2, 9);
+  // --- API HELPER ---
+  const callGAS = async (action, payload = {}) => {
+    if (!gasUrl) throw new Error("Google Apps Script URL is missing.");
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, payload })
+    });
+    const text = await response.text();
+    try {
+      const result = JSON.parse(text);
+      if (!result.success) throw new Error(result.error || "Server error");
+      return result;
+    } catch (err) {
+      throw new Error(err.message || 'Invalid response from server.');
+    }
+  };
 
-        // --- AUTHENTICATION SCREEN ---
-        const AuthScreen = ({ onLogin }) => {
-            const [username, setUsername] = useState('');
-            const [password, setPassword] = useState('');
-            const [loading, setLoading] = useState(false);
-            const [error, setError] = useState('');
-            const [msg, setMsg] = useState('');
+  // --- AUTHENTICATION ---
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      const result = await callGAS(authMode, authForm);
+      const user = { userId: result.userId, username: result.username };
+      setCurrentUser(user);
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      showStatus(`Welcome, ${result.username}!`);
+      setAuthForm({ username: '', password: '' });
+    } catch (error) {
+      showStatus(error.message, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-            const handleAuth = async (action) => {
-                if (!username || !password) return setError("Username and password required.");
-                setError(''); setMsg('');
-                setLoading(true);
+  const logout = () => {
+    setCurrentUser(null);
+    setClasses([]);
+    setStudents([]);
+    localStorage.removeItem('currentUser');
+    showStatus('Logged out successfully');
+  };
 
-                if (isCloudConfigured) {
-                    try {
-                        const res = await fetch(GAS_URL, {
-                            method: 'POST',
-                            body: JSON.stringify({ action, username, password })
-                        });
-                        const data = await res.json();
-                        if (data.status === 'success') {
-                            onLogin({ username, password }, data.data);
-                            if (action === 'REGISTER') setMsg("Registered on Google Drive! Please login.");
-                        } else {
-                            setError(data.message || "Authentication failed.");
-                        }
-                    } catch (err) {
-                        setError("Network error. Make sure your Apps Script Web App is deployed and URL is correct.");
-                    }
-                } else {
-                    const localUsers = JSON.parse(localStorage.getItem('omr_local_users') || '{}');
-                    
-                    if (action === 'REGISTER') {
-                        if (localUsers[username]) {
-                            setError("Username already exists locally.");
-                        } else {
-                            localUsers[username] = password;
-                            localStorage.setItem('omr_local_users', JSON.stringify(localUsers));
-                            localStorage.setItem(`omr_db_${username}`, JSON.stringify({ classes: [], students: [], exams: [], submissions: [] }));
-                            setMsg("Registered successfully locally! You can now login.");
-                        }
-                    } else if (action === 'LOGIN') {
-                        if (localUsers[username] !== password) {
-                            setError("Invalid username or password.");
-                        } else {
-                            const userDbStr = localStorage.getItem(`omr_db_${username}`);
-                            const userDb = userDbStr ? JSON.parse(userDbStr) : { classes: [], students: [], exams: [], submissions: [] };
-                            onLogin({ username, password }, userDb);
-                        }
-                    }
-                }
-                setLoading(false);
-            };
+  // --- DATA MANAGEMENT ---
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const result = await callGAS('getData', { userId: currentUser.userId });
+      setClasses(result.classes || []);
+      setStudents(result.students || []);
+      if (result.classes && result.classes.length > 0 && !selectedClass) {
+        setSelectedClass(result.classes[0].id);
+        setManageClassId(result.classes[0].id);
+      }
+    } catch (error) {
+      showStatus(`Data sync failed: ${error.message}`, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-            return (
-                <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
-                        <div className="flex justify-center mb-4">
-                            <div className="bg-blue-100 p-4 rounded-full text-blue-600">
-                                <Icon name="Lock" size={32} />
-                            </div>
-                        </div>
-                        <h2 className="text-2xl font-black text-center mb-2">ScanMaster Login</h2>
-                        <p className="text-slate-500 text-sm text-center mb-8">Register an account or login to access your data.</p>
-                        
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Username</label>
-                                <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Enter username..." />
-                            </div>
+  const handleAddClass = async (e) => {
+    e.preventDefault();
+    if (!newClassName.trim()) return;
+    setIsLoading(true);
+    const newClass = { id: generateSafeId(), name: newClassName.trim() };
+    
+    try {
+      await callGAS('saveClass', { userId: currentUser.userId, class: newClass });
+      setClasses([...classes, newClass]);
+      setNewClassName('');
+      if (!manageClassId) setManageClassId(newClass.id);
+      showStatus('Class added successfully');
+    } catch (error) {
+      showStatus(error.message, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Password</label>
-                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Enter password..." />
-                            </div>
+  const handleDeleteClass = async (classId) => {
+    if(!window.confirm("Delete this class and all its students?")) return;
+    setIsLoading(true);
+    try {
+      await callGAS('deleteClass', { userId: currentUser.userId, classId });
+      setClasses(classes.filter(c => c.id !== classId));
+      setStudents(students.filter(s => s.classId !== classId));
+      if (manageClassId === classId) setManageClassId('');
+      if (selectedClass === classId) setSelectedClass('');
+      showStatus('Class deleted');
+    } catch (error) {
+      showStatus(error.message, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-                            {!isCloudConfigured && (
-                                <p className="text-xs text-orange-600 bg-orange-50 p-2 rounded border border-orange-200 text-center">
-                                    ⚠️ Cloud URL not configured. Data will be saved locally in this browser.
-                                </p>
-                            )}
+  const handleAddStudent = async (e) => {
+    e.preventDefault();
+    if (!manageClassId || !studentForm.name.trim() || !studentForm.rollNo) return;
+    
+    // Automatically pad roll number to 2 digits (e.g. 1 -> 01)
+    const paddedRoll = String(studentForm.rollNo).padStart(2, '0');
+    
+    const newStudent = {
+      id: generateSafeId(),
+      classId: manageClassId,
+      rollNo: paddedRoll,
+      name: studentForm.name.trim()
+    };
 
-                            {error && <p className="text-red-500 text-sm text-center font-medium bg-red-50 p-2 rounded border border-red-200">{error}</p>}
-                            {msg && <p className="text-green-600 text-sm text-center font-medium bg-green-50 p-2 rounded border border-green-200">{msg}</p>}
+    setIsLoading(true);
+    try {
+      await callGAS('saveStudent', { userId: currentUser.userId, student: newStudent });
+      setStudents([...students, newStudent]);
+      setStudentForm({ name: '', rollNo: '' });
+      showStatus('Student added successfully');
+    } catch (error) {
+      showStatus(error.message, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-                            <div className="flex gap-4 pt-4">
-                                <button onClick={() => handleAuth('LOGIN')} disabled={loading} className="flex-1 bg-slate-900 text-white py-2 rounded-lg font-bold hover:bg-slate-800 disabled:opacity-50 transition-colors">
-                                    Login
-                                </button>
-                                <button onClick={() => handleAuth('REGISTER')} disabled={loading} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                                    Register
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
+  const handleDeleteStudent = async (studentId) => {
+    setIsLoading(true);
+    try {
+      await callGAS('deleteStudent', { userId: currentUser.userId, studentId });
+      setStudents(students.filter(s => s.id !== studentId));
+      showStatus('Student removed');
+    } catch (error) {
+      showStatus(error.message, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-        // --- MAIN APP COMPONENT ---
-        const App = () => {
-            const [user, setUser] = useState(() => {
-                const saved = localStorage.getItem('omr_current_user');
-                return saved ? JSON.parse(saved) : null;
-            });
-            const [currentView, setCurrentView] = useState('dashboard');
-            const [isSyncing, setIsSyncing] = useState(false);
-            
-            const [db, setDb] = useState({ classes: [], students: [], exams: [], submissions: [] });
+  // --- SCANNING & SYNC ---
+  const handleManualScan = (e) => {
+    e.preventDefault();
+    if (!manualInput.trim() || !selectedClass) {
+      showStatus('Please select a class and enter an ID.', 'error');
+      return;
+    }
 
-            useEffect(() => {
-                if (user && !isCloudConfigured) {
-                    const storedDb = localStorage.getItem(`omr_db_${user.username}`);
-                    if (storedDb) {
-                        setDb(JSON.parse(storedDb));
-                    }
-                }
-            }, [user]);
+    // Attempt to match the scanned ID with a student Roll No or Name in the selected class
+    const inputStr = manualInput.trim();
+    // Padding the input just in case they typed '1' instead of '01'
+    const paddedInput = !isNaN(inputStr) ? String(inputStr).padStart(2, '0') : inputStr;
+    
+    const matchedStudent = students.find(s => 
+      s.classId === selectedClass && 
+      (s.rollNo === paddedInput || s.name.toLowerCase() === inputStr.toLowerCase() || s.id === inputStr)
+    );
 
-            useEffect(() => {
-                if (user && db.classes) {
-                    localStorage.setItem(`omr_db_${user.username}`, JSON.stringify(db));
-                }
-            }, [db, user]);
+    const displayName = matchedStudent ? `${matchedStudent.name} (${matchedStudent.rollNo})` : inputStr.toUpperCase();
+    const saveId = matchedStudent ? matchedStudent.id : inputStr.toUpperCase();
 
-            const handleLogin = (loggedUser, loadedDb) => {
-                setUser(loggedUser);
-                localStorage.setItem('omr_current_user', JSON.stringify(loggedUser));
-                
-                if (loadedDb) {
-                    setDb(loadedDb);
-                    localStorage.setItem(`omr_db_${loggedUser.username}`, JSON.stringify(loadedDb));
-                }
-            };
+    const newRecord = {
+      id: generateSafeId(),
+      studentId: saveId,
+      displayName: displayName,
+      classId: selectedClass,
+      timestamp: new Date().toLocaleString(),
+      status: 'Present'
+    };
 
-            const handleLogout = () => {
-                setUser(null);
-                setDb({ classes: [], students: [], exams: [], submissions: [] });
-                localStorage.removeItem('omr_current_user');
-            };
+    setUnsyncedRecords([newRecord, ...unsyncedRecords]);
+    setManualInput('');
+    showStatus(`Scanned ${displayName} successfully.`, 'success');
+  };
 
-            const handleCloudSave = async () => {
-                if (!isCloudConfigured) {
-                    alert("⚠️ No Google Apps Script URL configured!\n\nPlease open the code and paste your deployed Code.gs URL into the GAS_URL variable to enable Google Drive saving.");
-                    return;
-                }
-                setIsSyncing(true);
-                try {
-                    const res = await fetch(GAS_URL, {
-                        method: 'POST',
-                        body: JSON.stringify({ action: 'SAVE', username: user.username, password: user.password, data: db })
-                    });
-                    const data = await res.json();
-                    if (data.status === 'success') {
-                        alert("✅ Successfully saved all data to Google Drive!");
-                    } else {
-                        alert("❌ Error saving: " + data.message);
-                    }
-                } catch (err) {
-                    alert("❌ Network error. Could not reach the Google Apps Script server.");
-                }
-                setIsSyncing(false);
-            };
+  const syncRecordsToGoogle = async () => {
+    if (unsyncedRecords.length === 0) return;
+    setIsLoading(true);
+    try {
+      const result = await callGAS('syncAttendance', { 
+        userId: currentUser.userId, 
+        records: unsyncedRecords 
+      });
+      setUnsyncedRecords([]);
+      showStatus(result.message, 'success');
+    } catch (error) {
+      showStatus(`Sync failed: ${error.message}`, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-            if (!user) {
-                return <AuthScreen onLogin={handleLogin} />;
-            }
+  const saveSettings = () => {
+    localStorage.setItem('gasUrl', gasUrl);
+    showStatus('Settings saved. You can now login.', 'success');
+  };
 
-            const renderView = () => {
-                switch (currentView) {
-                    case 'dashboard': return <Dashboard db={db} user={user} onSave={handleCloudSave} isSyncing={isSyncing} />;
-                    case 'classes': return <ClassManager db={db} setDb={setDb} />;
-                    case 'students': return <StudentManager db={db} setDb={setDb} />;
-                    case 'exams': return <ExamManager db={db} setDb={setDb} setCurrentView={setCurrentView} />;
-                    case 'scanner': return <Scanner db={db} setDb={setDb} />;
-                    default: return <Dashboard db={db} user={user} onSave={handleCloudSave} isSyncing={isSyncing} />;
-                }
-            };
+  // --- RENDERERS ---
 
-            return (
-                <div className="flex h-screen overflow-hidden">
-                    {/* Sidebar */}
-                    <div className="w-64 bg-slate-900 text-white flex flex-col">
-                        <div className="p-6">
-                            <h1 className="text-2xl font-black flex items-center gap-2">
-                                <Icon name="Scan" size={28} className="text-blue-400"/>
-                                ScanMaster
-                            </h1>
-                            <p className="text-slate-400 text-xs mt-1">OMR Evaluation System</p>
-                        </div>
-                        <nav className="flex-1 px-4 space-y-2">
-                            {[
-                                { id: 'dashboard', icon: 'Home', label: 'Dashboard' },
-                                { id: 'classes', icon: 'Book', label: 'Classes' },
-                                { id: 'students', icon: 'Users', label: 'Students' },
-                                { id: 'exams', icon: 'FileText', label: 'Exams & Templates' },
-                                { id: 'scanner', icon: 'Scan', label: 'Scan & Grade' },
-                            ].map(item => (
-                                <button
-                                    key={item.id}
-                                    onClick={() => setCurrentView(item.id)}
-                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${currentView === item.id ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-300 hover:bg-slate-800'}`}
-                                >
-                                    <Icon name={item.icon} size={18} />
-                                    <span className="font-medium">{item.label}</span>
-                                </button>
-                            ))}
-                        </nav>
-                        
-                        {/* User & Cloud Controls */}
-                        <div className="p-4 border-t border-slate-700 bg-slate-800/50">
-                            <div className="flex items-center gap-3 mb-4">
-                                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-slate-300">
-                                    <Icon name="Users" size={16} />
-                                </div>
-                                <div className="overflow-hidden">
-                                    <p className="text-sm font-bold truncate">{user.username}</p>
-                                    <p className="text-xs text-slate-400 truncate flex items-center gap-1">
-                                        {isCloudConfigured ? <><span className="w-2 h-2 rounded-full bg-green-500"></span> Drive Linked</> : <><span className="w-2 h-2 rounded-full bg-orange-500"></span> Local Only</>}
-                                    </p>
-                                </div>
-                            </div>
-                            
-                            <div className="flex flex-col gap-2">
-                                <button 
-                                    onClick={handleCloudSave} 
-                                    disabled={isSyncing} 
-                                    className="w-full flex justify-center items-center gap-2 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-bold transition shadow-md disabled:opacity-50"
-                                >
-                                    {isSyncing ? (
-                                        <><Icon name="RefreshCw" size={16} className="animate-spin" /> Saving...</>
-                                    ) : (
-                                        <><Icon name="Cloud" size={16} /> Save to Drive</>
-                                    )}
-                                </button>
-                                <button onClick={handleLogout} className="w-full flex justify-center items-center gap-1 bg-slate-700 hover:bg-red-600 text-white py-1.5 rounded-lg text-xs font-bold transition">
-                                    <Icon name="LogOut" size={14} /> Logout
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+  if (!gasUrl && activeTab !== 'settings') {
+    setActiveTab('settings');
+  }
 
-                    {/* Main Content */}
-                    <div className="flex-1 overflow-auto bg-slate-50 p-8">
-                        {renderView()}
-                    </div>
-                </div>
-            );
-        };
-
-        // --- COMPONENTS ---
-
-        const Dashboard = ({ db, user, onSave, isSyncing }) => (
-            <div className="animate-fade-in">
-                <div className="flex justify-between items-start mb-8">
-                    <div>
-                        <h2 className="text-3xl font-black text-slate-800 mb-2">Welcome, {user.username}!</h2>
-                        <p className="text-slate-500">Here's the overview of your classes and evaluation data.</p>
-                    </div>
-                    
-                    <button 
-                        onClick={onSave} 
-                        disabled={isSyncing} 
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold transition flex items-center gap-2 shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
-                    >
-                        {isSyncing ? (
-                            <><Icon name="RefreshCw" size={20} className="animate-spin" /> Saving Data...</>
-                        ) : (
-                            <><Icon name="Save" size={20} /> Save to Google Drive</>
-                        )}
-                    </button>
-                </div>
-
-                <div className="grid grid-cols-4 gap-6">
-                    <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                        <div className="p-4 bg-blue-100 text-blue-600 rounded-xl"><Icon name="Book" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Classes</p><p className="text-3xl font-black">{db.classes?.length || 0}</p></div>
-                    </div>
-                    <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                        <div className="p-4 bg-green-100 text-green-600 rounded-xl"><Icon name="Users" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Students</p><p className="text-3xl font-black">{db.students?.length || 0}</p></div>
-                    </div>
-                    <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                        <div className="p-4 bg-purple-100 text-purple-600 rounded-xl"><Icon name="FileText" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Exams</p><p className="text-3xl font-black">{db.exams?.length || 0}</p></div>
-                    </div>
-                    <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                        <div className="p-4 bg-orange-100 text-orange-600 rounded-xl"><Icon name="Scan" size={24}/></div>
-                        <div><p className="text-sm font-bold text-slate-400 uppercase">Scans</p><p className="text-3xl font-black">{db.submissions?.length || 0}</p></div>
-                    </div>
-                </div>
+  // Pre-login View
+  if (!currentUser && gasUrl) {
+    return (
+      <div className="flex flex-col min-h-screen bg-gray-50 text-gray-800 font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden justify-center p-6">
+        <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+          <div className="text-center mb-6">
+            <div className="bg-indigo-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="text-indigo-600" size={32} />
             </div>
-        );
+            <h1 className="text-2xl font-bold text-gray-900">{authMode === 'login' ? 'Welcome Back' : 'Create Account'}</h1>
+            <p className="text-sm text-gray-500 mt-1">Cloud-synced attendance tracker</p>
+          </div>
 
-        const ClassManager = ({ db, setDb }) => {
-            const [name, setName] = useState('');
-            
-            const addClass = (e) => {
-                e.preventDefault();
-                if (!name.trim()) return;
-                setDb(prev => ({ ...prev, classes: [...(prev.classes || []), { id: generateId(), name }] }));
-                setName('');
-            };
+          <form onSubmit={handleAuth} className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Username</label>
+              <div className="relative">
+                <User className="absolute left-3 top-3 text-gray-400" size={18} />
+                <input 
+                  type="text" 
+                  required
+                  value={authForm.username}
+                  onChange={(e) => setAuthForm({...authForm, username: e.target.value})}
+                  className="w-full pl-10 p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Enter username"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 text-gray-400" size={18} />
+                <input 
+                  type="password" 
+                  required
+                  value={authForm.password}
+                  onChange={(e) => setAuthForm({...authForm, password: e.target.value})}
+                  className="w-full pl-10 p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Enter password"
+                />
+              </div>
+            </div>
+            <button 
+              type="submit" 
+              disabled={isLoading}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white p-3 rounded-lg font-bold transition-colors mt-2"
+            >
+              {isLoading ? 'Processing...' : (authMode === 'login' ? 'Sign In' : 'Sign Up')}
+            </button>
+          </form>
 
-            const deleteClass = (id) => {
-                setDb(prev => ({ ...prev, classes: prev.classes.filter(c => c.id !== id) }));
-            };
+          <div className="text-center mt-6">
+            <button 
+              onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              {authMode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
+            </button>
+          </div>
+          
+          <div className="text-center mt-6 border-t pt-4">
+             <button onClick={() => { setGasUrl(''); setActiveTab('settings'); }} className="text-xs text-gray-400 underline">
+               Change Web App URL
+             </button>
+          </div>
+        </div>
 
-            return (
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-800 mb-6">Manage Classes & Sections</h2>
-                    <div className="grid grid-cols-3 gap-8">
-                        <div className="col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                            <h3 className="font-bold text-lg mb-4">Add New Class</h3>
-                            <form onSubmit={addClass} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Class/Section Name</label>
-                                    <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g. Grade 10 - Newton" required />
-                                </div>
-                                <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">Add Class</button>
-                            </form>
+        {/* Global Toast inside Auth Context */}
+        {statusMsg.text && (
+          <div className={`absolute top-4 left-4 right-4 z-50 p-3 rounded-lg shadow-lg text-sm flex items-start gap-2 ${
+            statusMsg.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'
+          }`}>
+            <span>{statusMsg.text}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Main App View
+  return (
+    <div className="flex flex-col min-h-screen bg-gray-50 text-gray-800 font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden">
+      
+      <header className="bg-indigo-600 text-white p-4 shadow-md flex justify-between items-center z-10">
+        <div className="flex items-center gap-2">
+          <CloudLightning size={24} />
+          <h1 className="text-xl font-bold tracking-tight">Scanner</h1>
+        </div>
+        {currentUser && (
+          <div className="flex items-center gap-2 text-xs bg-indigo-700 px-3 py-1.5 rounded-full">
+            <User size={14} /> {currentUser.username}
+          </div>
+        )}
+      </header>
+
+      {/* Global Status Toast */}
+      {statusMsg.text && (
+        <div className={`absolute top-16 left-4 right-4 z-50 p-3 rounded-lg shadow-lg text-sm flex items-start gap-2 transition-all opacity-100 ${
+          statusMsg.type === 'error' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-green-100 text-green-800 border-green-200'
+        }`}>
+          {statusMsg.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
+          <span>{statusMsg.text}</span>
+        </div>
+      )}
+
+      <main className="flex-1 overflow-y-auto pb-24 p-4">
+        
+        {/* --- TAB: SCAN --- */}
+        {activeTab === 'scan' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <div className="flex justify-between items-center mb-2">
+                <label className="text-sm font-semibold text-gray-700">Active Class</label>
+                <button onClick={fetchData} className="text-indigo-600 p-1 hover:bg-indigo-50 rounded"><RefreshCw size={16}/></button>
+              </div>
+              {classes.length === 0 ? (
+                 <div className="text-sm text-orange-600 bg-orange-50 p-3 rounded-lg flex items-center gap-2">
+                   <AlertTriangle size={16}/> No classes yet. Go to Manage tab to create one.
+                 </div>
+              ) : (
+                <select 
+                  value={selectedClass} 
+                  onChange={(e) => setSelectedClass(e.target.value)}
+                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="" disabled>Select a class...</option>
+                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
+            </div>
+
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 text-center space-y-4">
+              <div className="bg-gray-100 rounded-lg aspect-video flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-300">
+                 <Camera size={48} className="mb-2 opacity-50" />
+                 <p className="text-sm">Camera viewfinder ready</p>
+                 <p className="text-xs mt-1 text-gray-500">(Type Roll No. or ID below to simulate scan)</p>
+              </div>
+
+              <form onSubmit={handleManualScan} className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Roll No. or Name"
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                  autoComplete="off"
+                />
+                <button type="submit" disabled={!selectedClass} className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white px-4 py-3 rounded-lg font-medium">
+                  Add
+                </button>
+              </form>
+            </div>
+
+            {unsyncedRecords.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3 px-1">Unsynced ({unsyncedRecords.length})</h3>
+                <div className="space-y-2">
+                  {unsyncedRecords.slice(0, 3).map(rec => (
+                    <div key={rec.id} className="bg-white p-3 rounded-lg border border-gray-100 flex justify-between items-center shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-green-100 text-green-700 p-2 rounded-full"><Users size={16} /></div>
+                        <div>
+                          <p className="font-bold text-gray-800">{rec.displayName}</p>
+                          <p className="text-[10px] text-gray-500">{rec.timestamp}</p>
                         </div>
-                        <div className="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                            <table className="w-full text-left">
-                                <thead className="bg-slate-50 border-b">
-                                    <tr>
-                                        <th className="p-4 font-semibold text-slate-600">Class Name</th>
-                                        <th className="p-4 font-semibold text-slate-600">Students Enrolled</th>
-                                        <th className="p-4 font-semibold text-slate-600 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {(db.classes || []).map(c => (
-                                        <tr key={c.id} className="border-b last:border-0 hover:bg-slate-50">
-                                            <td className="p-4 font-medium">{c.name}</td>
-                                            <td className="p-4">{(db.students || []).filter(s => s.classId === c.id).length}</td>
-                                            <td className="p-4 text-right">
-                                                <button onClick={() => deleteClass(c.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Icon name="Trash" size={16}/></button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {(!db.classes || db.classes.length === 0) && <tr><td colSpan="3" className="p-8 text-center text-slate-500">No classes added yet.</td></tr>}
-                                </tbody>
-                            </table>
-                        </div>
+                      </div>
                     </div>
+                  ))}
+                  {unsyncedRecords.length > 3 && (
+                    <p className="text-center text-sm text-gray-500 mt-2 cursor-pointer hover:text-indigo-600" onClick={() => setActiveTab('sync')}>
+                      + {unsyncedRecords.length - 3} more
+                    </p>
+                  )}
                 </div>
-            );
-        };
+              </div>
+            )}
+          </div>
+        )}
 
-        const StudentManager = ({ db, setDb }) => {
-            const [mode, setMode] = useState('single'); 
-            const [name, setName] = useState('');
-            const [roll, setRoll] = useState('');
-            const [classId, setClassId] = useState('');
-            const [bulkData, setBulkData] = useState('');
+        {/* --- TAB: MANAGE (NEW) --- */}
+        {activeTab === 'manage' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {/* Class Management */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <h2 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><BookOpen size={18}/> Manage Classes</h2>
+              <form onSubmit={handleAddClass} className="flex gap-2 mb-4">
+                <input 
+                  type="text" placeholder="New Class Name" required
+                  value={newClassName} onChange={(e) => setNewClassName(e.target.value)}
+                  className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm"
+                />
+                <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-medium">Add</button>
+              </form>
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {classes.map(c => (
+                  <div key={c.id} className="flex justify-between items-center bg-gray-50 p-2 rounded-md border text-sm">
+                    <span className="font-medium">{c.name}</span>
+                    <button onClick={() => handleDeleteClass(c.id)} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-            const addSingle = (e) => {
-                e.preventDefault();
-                if (!name || !roll || !classId) return;
-                setDb(prev => ({ ...prev, students: [...(prev.students || []), { id: generateId(), name, rollNumber: roll, classId }] }));
-                setName(''); setRoll('');
-            };
+            {/* Student Management */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+              <h2 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><Users size={18}/> Manage Students</h2>
+              
+              {classes.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-2">Create a class first.</p>
+              ) : (
+                <>
+                  <select 
+                    value={manageClassId} 
+                    onChange={(e) => setManageClassId(e.target.value)}
+                    className="w-full p-2 mb-4 bg-gray-50 border border-gray-200 rounded-lg text-sm"
+                  >
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
 
-            const addBulk = (e) => {
-                e.preventDefault();
-                if (!bulkData.trim() || !classId) return;
-                const rows = bulkData.split('\n');
-                const newStudents = rows.map(row => {
-                    const [sName, sRoll] = row.split(',').map(s => s.trim());
-                    if (sName && sRoll) return { id: generateId(), name: sName, rollNumber: sRoll, classId };
-                    return null;
-                }).filter(Boolean);
-                
-                setDb(prev => ({ ...prev, students: [...(prev.students || []), ...newStudents] }));
-                setBulkData('');
-            };
-
-            const deleteStudent = (id) => setDb(prev => ({ ...prev, students: prev.students.filter(s => s.id !== id) }));
-
-            return (
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-800 mb-6">Manage Students</h2>
-                    <div className="grid grid-cols-3 gap-8">
-                        <div className="col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
-                            <div className="flex bg-slate-100 p-1 rounded-lg mb-6">
-                                <button onClick={() => setMode('single')} className={`flex-1 py-1 text-sm font-medium rounded-md transition-colors ${mode === 'single' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Single</button>
-                                <button onClick={() => setMode('bulk')} className={`flex-1 py-1 text-sm font-medium rounded-md transition-colors ${mode === 'bulk' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Bulk CSV</button>
-                            </div>
-
-                            {mode === 'single' ? (
-                                <form onSubmit={addSingle} className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Select Class</label>
-                                        <select value={classId} onChange={e => setClassId(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required>
-                                            <option value="">-- Choose Class --</option>
-                                            {(db.classes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div><label className="block text-sm font-medium text-slate-700 mb-1">Student Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required /></div>
-                                    <div><label className="block text-sm font-medium text-slate-700 mb-1">Roll Number</label><input type="number" value={roll} onChange={e => setRoll(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required /></div>
-                                    <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">Add Student</button>
-                                </form>
-                            ) : (
-                                <form onSubmit={addBulk} className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Select Class</label>
-                                        <select value={classId} onChange={e => setClassId(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" required>
-                                            <option value="">-- Choose Class --</option>
-                                            {(db.classes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-700 mb-1">Paste CSV Data (Name, RollNumber)</label>
-                                        <textarea value={bulkData} onChange={e => setBulkData(e.target.value)} className="w-full p-2 border rounded-lg h-32 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="John Doe, 1001&#10;Jane Smith, 1002" required></textarea>
-                                    </div>
-                                    <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">Import Students</button>
-                                </form>
-                            )}
-                        </div>
-                        <div className="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                            <table className="w-full text-left">
-                                <thead className="bg-slate-50 border-b">
-                                    <tr>
-                                        <th className="p-4 font-semibold text-slate-600">Roll No.</th>
-                                        <th className="p-4 font-semibold text-slate-600">Name</th>
-                                        <th className="p-4 font-semibold text-slate-600">Class</th>
-                                        <th className="p-4 font-semibold text-slate-600 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {(db.students || []).map(s => (
-                                        <tr key={s.id} className="border-b last:border-0 hover:bg-slate-50">
-                                            <td className="p-4 font-mono text-slate-600">{s.rollNumber}</td>
-                                            <td className="p-4 font-medium">{s.name}</td>
-                                            <td className="p-4 text-slate-600">{(db.classes || []).find(c => c.id === s.classId)?.name || 'Unknown'}</td>
-                                            <td className="p-4 text-right">
-                                                <button onClick={() => deleteStudent(s.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Icon name="Trash" size={16}/></button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {(!db.students || db.students.length === 0) && <tr><td colSpan="4" className="p-8 text-center text-slate-500">No students added yet.</td></tr>}
-                                </tbody>
-                            </table>
-                        </div>
+                  <form onSubmit={handleAddStudent} className="flex flex-col gap-2 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <div className="flex gap-2">
+                      <input 
+                        type="number" placeholder="Roll (e.g. 1)" required min="1"
+                        value={studentForm.rollNo} onChange={(e) => setStudentForm({...studentForm, rollNo: e.target.value})}
+                        className="w-24 p-2 border border-gray-200 rounded-md text-sm"
+                      />
+                      <input 
+                        type="text" placeholder="Student Name" required
+                        value={studentForm.name} onChange={(e) => setStudentForm({...studentForm, name: e.target.value})}
+                        className="flex-1 p-2 border border-gray-200 rounded-md text-sm"
+                      />
                     </div>
-                </div>
-            );
-        };
+                    <button type="submit" disabled={isLoading} className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-md text-sm font-medium flex items-center justify-center gap-2">
+                      <UserPlus size={16}/> Add Student
+                    </button>
+                  </form>
 
-        const ExamManager = ({ db, setDb }) => {
-            const [editingExamId, setEditingExamId] = useState(null);
-
-            const createNewExam = () => {
-                const newExam = {
-                    id: generateId(),
-                    name: 'New Exam ' + ((db.exams || []).length + 1),
-                    classId: db.classes?.[0]?.id || '',
-                    date: new Date().toISOString().split('T')[0],
-                    templateConfig: {
-                        paperSize: 'Letter',
-                        rollDigits: 4,
-                        instructions: 'Please shade circles completely. Use black or blue ink. Do not fold or tear the paper.',
-                        sections: [
-                            { id: generateId(), type: 'MCQ', count: 50, options: 4, startNumber: 1 }
-                        ]
-                    },
-                    answerKey: {} 
-                };
-                setDb(prev => ({ ...prev, exams: [...(prev.exams || []), newExam] }));
-                setEditingExamId(newExam.id);
-            };
-
-            const deleteExam = (id) => {
-                setDb(prev => ({ ...prev, exams: prev.exams.filter(e => e.id !== id), submissions: prev.submissions.filter(s => s.examId !== id) }));
-                if (editingExamId === id) setEditingExamId(null);
-            };
-
-            if (editingExamId) {
-                const exam = db.exams.find(e => e.id === editingExamId);
-                return <TemplateEditor exam={exam} db={db} setDb={setDb} onBack={() => setEditingExamId(null)} />;
-            }
-
-            return (
-                <div>
-                    <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">Manage Exams & Templates</h2>
-                        <button onClick={createNewExam} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-2 transition-colors">
-                            <Icon name="FileText" size={18}/> Create Exam
-                        </button>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-6">
-                        {(db.exams || []).map(exam => {
-                            const totalQ = exam.templateConfig.sections.reduce((acc, s) => acc + s.count, 0);
-                            const keysSet = Object.keys(exam.answerKey || {}).length;
-                            
-                            return (
-                                <div key={exam.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-                                    <h3 className="text-xl font-bold mb-1">{exam.name}</h3>
-                                    <p className="text-slate-500 text-sm mb-4">Class: {(db.classes || []).find(c => c.id === exam.classId)?.name || 'Unassigned'} • Date: {exam.date}</p>
-                                    
-                                    <div className="mb-4 text-sm font-medium flex items-center gap-2">
-                                        <Icon name="Key" size={16} className="text-slate-400" />
-                                        <span className={keysSet === totalQ ? 'text-green-600' : 'text-orange-500'}>
-                                            Answer Key: {keysSet}/{totalQ} set
-                                        </span>
-                                    </div>
-
-                                    <div className="mt-auto flex gap-2">
-                                        <button onClick={() => setEditingExamId(exam.id)} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-200 text-sm text-center transition-colors">Edit / Key</button>
-                                        <button onClick={() => deleteExam(exam.id)} className="px-3 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors"><Icon name="Trash" size={16}/></button>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                        {(!db.exams || db.exams.length === 0) && <div className="col-span-3 text-center p-12 bg-white rounded-2xl border border-slate-200 text-slate-500">No exams created yet.</div>}
-                    </div>
-                </div>
-            );
-        };
-
-        const TemplateEditor = ({ exam, db, setDb, onBack }) => {
-            const [localExam, setLocalExam] = useState(exam);
-            const [activeTab, setActiveTab] = useState('layout'); 
-            const [scale, setScale] = useState(1);
-            const containerRef = useRef(null);
-
-            if (!localExam.templateConfig.paperSize) {
-                localExam.templateConfig.paperSize = 'Letter';
-            }
-
-            // Fixed Dimensions based on 96 DPI to prevent ANY layout shift during print/export
-            const paperDims = {
-                'Letter': { w: 8.5, h: 11, format: 'letter' },
-                'Legal': { w: 8.5, h: 14, format: 'legal' },
-                'A4': { w: 8.27, h: 11.69, format: 'a4' }
-            };
-            const pSize = paperDims[localExam.templateConfig.paperSize];
-            const templateW = Math.floor(pSize.w * 96);
-            const templateH = Math.floor(pSize.h * 96);
-
-            // Responsive Scaling for Preview Window ONLY
-            useEffect(() => {
-                const updateScale = () => {
-                    if (containerRef.current) {
-                        const availableWidth = containerRef.current.clientWidth - 64;
-                        const availableHeight = containerRef.current.clientHeight - 64;
-                        const scaleW = availableWidth / templateW;
-                        const scaleH = availableHeight / templateH;
-                        setScale(Math.min(scaleW, scaleH, 1));
-                    }
-                };
-                window.addEventListener('resize', updateScale);
-                const timer = setTimeout(updateScale, 50); // initial calc
-                return () => {
-                    window.removeEventListener('resize', updateScale);
-                    clearTimeout(timer);
-                };
-            }, [templateW, templateH, activeTab]);
-
-            const updateExam = (updates) => {
-                const updated = { ...localExam, ...updates };
-                setLocalExam(updated);
-                setDb(prev => ({
-                    ...prev,
-                    exams: prev.exams.map(e => e.id === updated.id ? updated : e)
-                }));
-            };
-
-            const addSection = (type) => {
-                const currentSections = localExam.templateConfig.sections;
-                let startNumber = 1;
-                if (currentSections.length > 0) {
-                    const last = currentSections[currentSections.length - 1];
-                    startNumber = last.startNumber + last.count;
-                }
-                const newSection = { id: generateId(), type, count: 10, options: 4, startNumber };
-                updateExam({ templateConfig: { ...localExam.templateConfig, sections: [...currentSections, newSection] } });
-            };
-
-            const removeSection = (id) => {
-                updateExam({ templateConfig: { ...localExam.templateConfig, sections: localExam.templateConfig.sections.filter(s => s.id !== id) } });
-            };
-
-            const handleBubbleClick = (type, q, val) => {
-                if (type !== 'q') return; 
-                const qKey = `q-${q}`;
-                const newKey = { ...(localExam.answerKey || {}) };
-                if (newKey[qKey] === val) {
-                    delete newKey[qKey];
-                } else {
-                    newKey[qKey] = val;
-                }
-                updateExam({ answerKey: newKey });
-            };
-
-            const exportPDF = () => {
-                const el = document.getElementById('printable-template');
-                html2canvas(el, { scale: 2, useCORS: true }).then(canvas => {
-                    const imgData = canvas.toDataURL('image/jpeg', 1.0);
-                    const pdf = new window.jspdf.jsPDF('p', 'in', pSize.format);
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pSize.w, pSize.h);
-                    pdf.save(`${localExam.name}_OMR.pdf`);
-                });
-            };
-
-            const totalQuestions = localExam.templateConfig.sections.reduce((acc, s) => acc + s.count, 0);
-            const setAnswersCount = Object.keys(localExam.answerKey || {}).length;
-
-            return (
-                <div className="flex gap-8 h-[85vh]">
-                    <div className="w-80 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col shrink-0">
-                        <button onClick={onBack} className="w-full bg-slate-900 text-white py-2 rounded-lg font-bold hover:bg-slate-800 flex items-center justify-center gap-2 transition-colors mb-6 shadow">
-                            <Icon name="Save" size={16} /> Save & Return
-                        </button>
-                        
-                        <div className="flex bg-slate-100 p-1 rounded-lg mb-6 shrink-0">
-                            <button onClick={() => setActiveTab('layout')} className={`flex-1 py-1 text-sm font-medium rounded-md transition-colors ${activeTab === 'layout' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Template Layout</button>
-                            <button onClick={() => setActiveTab('key')} className={`flex-1 py-1 text-sm font-medium rounded-md transition-colors ${activeTab === 'key' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Answer Key</button>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {students.filter(s => s.classId === manageClassId).sort((a,b)=> Number(a.rollNo) - Number(b.rollNo)).map(s => (
+                      <div key={s.id} className="flex justify-between items-center bg-white p-2 rounded-md border text-sm">
+                        <div className="flex items-center gap-3">
+                          <span className="bg-indigo-100 text-indigo-800 font-mono text-xs px-2 py-1 rounded-full">{s.rollNo}</span>
+                          <span className="font-medium text-gray-700">{s.name}</span>
                         </div>
-
-                        {activeTab === 'layout' ? (
-                            <div className="overflow-y-auto pr-2 space-y-6 flex-1">
-                                <div>
-                                    <h3 className="font-bold text-lg mb-4">Exam Settings</h3>
-                                    <div className="space-y-4">
-                                        <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Exam Name</label><input type="text" value={localExam.name} onChange={e => updateExam({name: e.target.value})} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" /></div>
-                                        
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Paper Size</label>
-                                            <select value={localExam.templateConfig.paperSize} onChange={e => updateExam({templateConfig: {...localExam.templateConfig, paperSize: e.target.value}})} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                                                <option value="Letter">Short (Letter - 8.5" x 11")</option>
-                                                <option value="Legal">Long (Legal - 8.5" x 14")</option>
-                                                <option value="A4">A4 (8.27" x 11.69")</option>
-                                            </select>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Assign Class</label>
-                                            <select value={localExam.classId} onChange={e => updateExam({classId: e.target.value})} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                                                <option value="">-- Choose --</option>
-                                                {(db.classes || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                            </select>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Roll Number Digits ({localExam.templateConfig.rollDigits})</label>
-                                            <input type="range" min="2" max="6" value={localExam.templateConfig.rollDigits} onChange={e => updateExam({templateConfig: {...localExam.templateConfig, rollDigits: parseInt(e.target.value)}})} className="w-full" />
-                                        </div>
-                                        
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Exam Instructions</label>
-                                            <textarea 
-                                                value={localExam.templateConfig.instructions !== undefined ? localExam.templateConfig.instructions : ''} 
-                                                onChange={e => updateExam({templateConfig: {...localExam.templateConfig, instructions: e.target.value}})} 
-                                                className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none h-20" 
-                                                placeholder="Enter instructions for students to read..."></textarea>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <h3 className="font-bold text-lg mb-4">Template Sections</h3>
-                                    <div className="space-y-4">
-                                        {localExam.templateConfig.sections.map((sec, idx) => (
-                                            <div key={sec.id} className="p-3 border rounded-lg bg-slate-50 relative">
-                                                <button onClick={() => removeSection(sec.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 transition-colors"><Icon name="Trash" size={14}/></button>
-                                                <p className="font-bold text-sm mb-2">{sec.type} Section</p>
-                                                <div className="flex items-center gap-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <label className="text-xs text-slate-600">Count:</label>
-                                                        <input type="number" min="1" max="150" value={sec.count} onChange={e => {
-                                                            const newSecs = [...localExam.templateConfig.sections];
-                                                            newSecs[idx].count = parseInt(e.target.value) || 1;
-                                                            updateExam({templateConfig: {...localExam.templateConfig, sections: newSecs}});
-                                                        }} className="w-16 p-1 border rounded text-xs outline-none focus:ring-2 focus:ring-blue-500" />
-                                                    </div>
-                                                    {sec.type === 'MCQ' && (
-                                                        <div className="flex items-center gap-2">
-                                                        <label className="text-xs text-slate-600">Options:</label>
-                                                        <input type="number" min="2" max="10" value={sec.options || 4} onChange={e => {
-                                                            const newSecs = [...localExam.templateConfig.sections];
-                                                            newSecs[idx].options = parseInt(e.target.value) || 4;
-                                                            updateExam({templateConfig: {...localExam.templateConfig, sections: newSecs}});
-                                                        }} className="w-16 p-1 border rounded text-xs outline-none focus:ring-2 focus:ring-blue-500" />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                        <div className="flex gap-2">
-                                            <button onClick={() => addSection('MCQ')} className="flex-1 bg-white border border-slate-300 text-slate-700 py-1 rounded text-xs font-medium hover:bg-slate-50 transition-colors">+ MCQ</button>
-                                            <button onClick={() => addSection('T/F')} className="flex-1 bg-white border border-slate-300 text-slate-700 py-1 rounded text-xs font-medium hover:bg-slate-50 transition-colors">+ T/F</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex-1 flex flex-col text-center">
-                                <div className="p-4 bg-blue-50 text-blue-800 rounded-xl mb-4 border border-blue-100">
-                                    <Icon name="Key" size={24} className="mx-auto mb-2 opacity-80" />
-                                    <p className="text-sm font-medium mb-1">Interactive Answer Key</p>
-                                    <p className="text-xs opacity-80">Click directly on the bubbles in the OMR preview on the right to set the correct answers.</p>
-                                </div>
-
-                                <div className="mt-4 p-4 border rounded-xl bg-slate-50">
-                                    <p className="text-sm text-slate-500 font-bold uppercase mb-1">Progress</p>
-                                    <p className={`text-3xl font-black ${setAnswersCount === totalQuestions ? 'text-green-600' : 'text-slate-800'}`}>
-                                        {setAnswersCount} / {totalQuestions}
-                                    </p>
-                                    <p className="text-xs text-slate-400 mt-1">questions configured</p>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="mt-4 pt-4 border-t space-y-2 shrink-0">
-                            <button onClick={() => window.print()} className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 flex justify-center items-center gap-2 transition-colors"><Icon name="Printer" size={16}/> Print OMR</button>
-                            <button onClick={exportPDF} className="w-full bg-slate-800 text-white py-2 rounded-lg font-medium hover:bg-slate-900 text-sm flex justify-center items-center gap-1 transition-colors"><Icon name="Download" size={14}/> PDF Export</button>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 bg-slate-200 rounded-2xl flex justify-center items-start overflow-hidden p-8 border border-slate-300 shadow-inner relative" ref={containerRef}>
-                        {/* Scale Wrapper allows us to fit the fixed 8.5x11in layout neatly on any screen without altering internal sizes */}
-                        <div className={`transition-all duration-300 origin-top flex justify-center ${activeTab === 'key' ? 'ring-8 ring-blue-400 ring-opacity-50' : ''}`} style={{
-                            width: templateW,
-                            height: templateH,
-                            transform: `scale(${scale})`,
-                            marginBottom: `-${templateH * (1 - scale)}px`, 
-                            marginRight: `-${templateW * (1 - scale)}px`
-                        }}>
-                            <div id="printable-template" className="print-container w-full h-full bg-white shadow-2xl">
-                                <OMRSheet 
-                                    config={localExam.templateConfig} 
-                                    title={localExam.name} 
-                                    classNameName={(db.classes || []).find(c => c.id === localExam.classId)?.name} 
-                                    answerData={activeTab === 'key' ? (localExam.answerKey || {}) : {}}
-                                    interactive={activeTab === 'key'}
-                                    onBubbleClick={handleBubbleClick}
-                                    pixelDims={{w: templateW, h: templateH}}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        const OMRSheet = ({ config, title, classNameName, answerData = {}, interactive = false, onBubbleClick = null, pixelDims = null }) => {
-            const paperDims = {
-                'Letter': { w: 8.5, h: 11 },
-                'Legal': { w: 8.5, h: 14 },
-                'A4': { w: 8.27, h: 11.69 }
-            };
-            const pSize = paperDims[config.paperSize || 'Letter'];
-            const templateW = pixelDims ? pixelDims.w : Math.floor(pSize.w * 96);
-            const templateH = pixelDims ? pixelDims.h : Math.floor(pSize.h * 96);
-
-            const totalQuestions = config.sections.reduce((acc, sec) => acc + sec.count, 0) || 1;
-            const maxOptions = Math.max(...config.sections.map(s => s.options || 4), 2);
-
-            let bestBubbleSize = 0;
-            let bestCols = 1;
-            
-            const availHeightPx = templateH - (3.5 * 96); 
-            const availWidthPx = templateW - (1.0 * 96); 
-            
-            for(let c = 1; c <= 5; c++) {
-                const itemsPerCol = Math.ceil(totalQuestions / c);
-                const maxRowHeight = availHeightPx / itemsPerCol;
-                const maxColWidth = availWidthPx / c;
-                
-                const widthConstraint = (maxColWidth - 40) / maxOptions; 
-                const heightConstraint = maxRowHeight * 0.7;
-                
-                const bSize = Math.min(widthConstraint, heightConstraint, 18);
-                if (bSize > bestBubbleSize) {
-                    bestBubbleSize = bSize;
-                    bestCols = c;
-                }
-            }
-            
-            const finalBubbleSize = Math.floor(Math.max(bestBubbleSize, 10)); // Fixed integer pixel sizes
-            const fontSize = Math.floor(Math.max(finalBubbleSize * 0.55, 7));
-
-            return (
-                <div className="omr-template w-full h-full flex flex-col" style={{
-                    width: `${templateW}px`,
-                    height: `${templateH}px`,
-                    '--bubble-size': `${finalBubbleSize}px`,
-                    '--font-size': `${fontSize}px`
-                }}>
-                    <div className="flex justify-between items-start mb-2 border-b-2 border-black pb-2 shrink-0">
-                        <div className="flex-1">
-                            <h1 className="text-2xl font-black uppercase leading-tight">{title || 'Exam Title'}</h1>
-                            <p className="text-sm font-bold mt-1">Class: {classNameName || '____________________'}</p>
-                            <div className="mt-4 space-y-3">
-                                <p className="text-sm">Name: _________________________________________</p>
-                                <p className="text-sm">Date: __________________ Score: _______________</p>
-                            </div>
-                        </div>
-                        
-                        <div className="ml-4 pl-4 border-l-2 border-black">
-                            <p className="text-[11px] font-bold text-center mb-2 tracking-widest">ROLL NO.</p>
-                            <div className="flex gap-1 justify-center">
-                                {Array.from({ length: config.rollDigits }).map((_, colIdx) => (
-                                    <div key={`roll-col-${colIdx}`} className="flex flex-col items-center gap-[2px]">
-                                        <div className="w-5 h-5 border border-black mb-1"></div>
-                                        {Array.from({ length: 10 }).map((_, num) => {
-                                            const isFilled = answerData.roll && answerData.roll[colIdx] === num;
-                                            return (
-                                                <div key={`r-${colIdx}-${num}`} className={`omr-bubble ${isFilled ? 'filled' : ''}`} data-type="roll" data-col={colIdx} data-val={num}>
-                                                    {num}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-
-                    {config.instructions && config.instructions.trim() !== '' && (
-                        <div className="border border-black p-[6px] mb-4 bg-slate-50 shrink-0">
-                            <p className="text-[11px] leading-tight">
-                                <span className="font-bold uppercase mr-1">Instructions:</span>
-                                {config.instructions}
-                            </p>
-                        </div>
+                        <button onClick={() => handleDeleteStudent(s.id)} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
+                      </div>
+                    ))}
+                    {students.filter(s => s.classId === manageClassId).length === 0 && (
+                      <p className="text-center text-xs text-gray-400 py-2">No students in this class.</p>
                     )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
-                    <div className="flex-1 overflow-hidden" style={{ 
-                        columnCount: bestCols, 
-                        columnGap: '20px', 
-                        columnFill: 'auto',
-                        height: '100%' 
-                    }}>
-                        {config.sections.map(sec => (
-                            <React.Fragment key={sec.id}>
-                                <h4 className="font-bold border-b border-black mb-2 pb-[2px] mt-3 first:mt-0 uppercase tracking-wider" style={{ pageBreakAfter: 'avoid', breakAfter: 'avoid', fontSize: `${Math.max(fontSize * 1.3, 12)}px` }}>{sec.type} Section</h4>
-                                {Array.from({ length: sec.count }).map((_, qIdx) => {
-                                    const qNum = sec.startNumber + qIdx;
-                                    const labels = sec.type === 'MCQ' ? ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].slice(0, sec.options || 4) : ['T', 'F'];
-                                    
-                                    // Use absolute inline-flex widths to guarantee rows don't break randomly in columns
-                                    return (
-                                        <div key={`q-${qNum}`} className="flex items-center mb-[6px] w-full" style={{ display: 'inline-flex', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-                                            <span className="font-bold text-right shrink-0 mr-2" style={{ width: `${Math.max(fontSize * 2.5, 20)}px`, fontSize: `${fontSize * 1.2}px` }}>{qNum}.</span>
-                                            <div className="flex flex-wrap flex-1 items-center" style={{gap: '4px'}}>
-                                                {labels.map((lbl) => {
-                                                    const isFilled = answerData && answerData[`q-${qNum}`] === lbl;
-                                                    return (
-                                                        <div 
-                                                            key={`opt-${lbl}`} 
-                                                            className={`omr-bubble ${isFilled ? 'filled' : ''} ${interactive ? 'interactive' : ''}`} 
-                                                            data-type="q" data-q={qNum} data-val={lbl}
-                                                            onClick={() => interactive && onBubbleClick && onBubbleClick('q', qNum, lbl)}
-                                                        >
-                                                            {lbl}
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </React.Fragment>
-                        ))}
-                    </div>
-                </div>
-            );
-        };
-
-        const Scanner = ({ db, setDb }) => {
-            const [selectedExamId, setSelectedExamId] = useState('');
-            const [scanMode, setScanMode] = useState('upload');
-            const [isCameraOn, setIsCameraOn] = useState(false);
-            
-            const [imageSrc, setImageSrc] = useState(null);
-            const [scanResult, setScanResult] = useState(null);
-            const [isScanning, setIsScanning] = useState(false);
-            
-            const hiddenTemplateRef = useRef(null);
-            const canvasRef = useRef(null);
-            const videoRef = useRef(null);
-
-            const stopCamera = () => {
-                if (videoRef.current && videoRef.current.srcObject) {
-                    videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-                    videoRef.current.srcObject = null;
-                }
-                setIsCameraOn(false);
-            };
-
-            useEffect(() => {
-                return () => stopCamera();
-            }, []);
-
-            useEffect(() => {
-                if (scanMode === 'upload') {
-                    stopCamera();
-                }
-            }, [scanMode]);
-
-            const startCamera = async () => {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
-                    });
-                    if (videoRef.current) {
-                        videoRef.current.srcObject = stream;
-                        setIsCameraOn(true);
-                    }
-                } catch (err) {
-                    console.error("Camera error:", err);
-                    alert("Unable to access camera. Please check your browser permissions.");
-                    setIsCameraOn(false);
-                    setScanMode('upload');
-                }
-            };
-
-            const capturePhoto = () => {
-                if (videoRef.current) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = videoRef.current.videoWidth;
-                    canvas.height = videoRef.current.videoHeight;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-                    setImageSrc(canvas.toDataURL('image/jpeg', 0.9));
-                    stopCamera(); 
-                }
-            };
-
-            const handleFileChange = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        setImageSrc(event.target.result);
-                        setScanResult(null);
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
-
-            const processScan = () => {
-                if (!imageSrc || !selectedExamId) return;
-                setIsScanning(true);
-
-                const exam = db.exams.find(e => e.id === selectedExamId);
-                const templateConfig = exam.templateConfig;
-                const answerKey = exam.answerKey || {};
-                const totalQuestions = templateConfig.sections.reduce((acc, sec) => acc + sec.count, 0);
-
-                const calibContainer = hiddenTemplateRef.current.querySelector('.omr-template');
-                const calibRect = calibContainer.getBoundingClientRect();
-                const bubbles = calibContainer.querySelectorAll('.omr-bubble');
+        {/* --- TAB: SYNC --- */}
+        {activeTab === 'sync' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="p-6 bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-center">
+                <CloudLightning size={48} className="mx-auto mb-3 opacity-90" />
+                <h2 className="text-2xl font-bold">{unsyncedRecords.length}</h2>
+                <p className="text-indigo-100 text-sm">Records pending sync</p>
                 
-                const expectedCoords = Array.from(bubbles).map(b => {
-                    const br = b.getBoundingClientRect();
-                    return {
-                        type: b.dataset.type,
-                        col: b.dataset.col,
-                        val: b.dataset.val,
-                        q: b.dataset.q,
-                        // Get relative x,y,w,h mapping
-                        rx: (br.left - calibRect.left) / calibRect.width,
-                        ry: (br.top - calibRect.top) / calibRect.height,
-                        rw: br.width / calibRect.width,
-                        rh: br.height / calibRect.height
-                    };
-                });
-
-                const img = new Image();
-                img.onload = () => {
-                    const cvs = canvasRef.current;
-                    const ctx = cvs.getContext('2d', { willReadFrequently: true });
-                    cvs.width = img.width;
-                    cvs.height = img.height;
-                    ctx.drawImage(img, 0, 0);
-
-                    const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-                    const pixels = imgData.data;
-
-                    const getDarknessAndDraw = (r) => {
-                        // FIX: Only measure the INNER 50% core of the bubble to avoid the black border line!
-                        // This makes the scanning immune to slight misalignments
-                        const coreRx = r.rx + (r.rw * 0.25);
-                        const coreRy = r.ry + (r.rh * 0.25);
-                        const coreRw = r.rw * 0.5;
-                        const coreRh = r.rh * 0.5;
-
-                        const startX = Math.floor(coreRx * cvs.width);
-                        const startY = Math.floor(coreRy * cvs.height);
-                        const w = Math.floor(coreRw * cvs.width);
-                        const h = Math.floor(coreRh * cvs.height);
-                        
-                        let totalDarkness = 0;
-                        let count = 0;
-                        for (let y = startY; y < startY + h; y++) {
-                            for (let x = startX; x < startX + w; x++) {
-                                const i = (y * cvs.width + x) * 4;
-                                // Grayscale conversion formula
-                                const brightness = (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
-                                totalDarkness += (255 - brightness);
-                                count++;
-                            }
-                        }
-                        const avgDark = count > 0 ? totalDarkness / count : 0;
-                        
-                        // DRAW DEBUG BOX OVERLAY
-                        ctx.strokeStyle = avgDark > 60 ? 'rgba(0, 255, 0, 0.8)' : 'rgba(0, 100, 255, 0.5)';
-                        ctx.lineWidth = Math.max(cvs.width * 0.002, 1);
-                        ctx.strokeRect(startX, startY, w, h);
-                        
-                        if (avgDark > 60) {
-                            ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
-                            ctx.fillRect(startX, startY, w, h);
-                        }
-                        return avgDark;
-                    };
-
-                    const rawResults = expectedCoords.map(c => ({
-                        ...c,
-                        darkness: getDarknessAndDraw(c)
-                    }));
-
-                    const parsedRoll = {};
-                    const parsedAnswers = {};
-
-                    for (let col = 0; col < templateConfig.rollDigits; col++) {
-                        const colBubbles = rawResults.filter(r => r.type === 'roll' && parseInt(r.col) === col);
-                        const darkest = colBubbles.reduce((prev, curr) => (curr.darkness > prev.darkness ? curr : prev), {darkness: 0});
-                        if (darkest.darkness > 60) parsedRoll[col] = parseInt(darkest.val);
-                    }
-
-                    const allQNums = [...new Set(rawResults.filter(r => r.type === 'q').map(r => r.q))];
-                    allQNums.forEach(qNum => {
-                        const qBubbles = rawResults.filter(r => r.type === 'q' && r.q === qNum);
-                        const darkest = qBubbles.reduce((prev, curr) => (curr.darkness > prev.darkness ? curr : prev), {darkness: 0});
-                        if (darkest.darkness > 60) parsedAnswers[`q-${qNum}`] = darkest.val;
-                    });
-
-                    let finalRollStr = '';
-                    for (let i = 0; i < templateConfig.rollDigits; i++) {
-                        finalRollStr += (parsedRoll[i] !== undefined ? parsedRoll[i] : '?');
-                    }
-
-                    const studentMatch = (db.students || []).find(s => s.rollNumber === finalRollStr);
-
-                    // GRADING LOGIC
-                    let score = 0;
-                    const graded = {};
-                    
-                    Object.keys(parsedAnswers).forEach(qKey => {
-                        if (answerKey[qKey] === parsedAnswers[qKey]) {
-                            score++;
-                            graded[qKey] = { status: 'correct', val: parsedAnswers[qKey] };
-                        } else {
-                            graded[qKey] = { status: 'incorrect', val: parsedAnswers[qKey], correctVal: answerKey[qKey] };
-                        }
-                    });
-
-                    setScanResult({
-                        roll: finalRollStr,
-                        student: studentMatch,
-                        answers: parsedAnswers,
-                        graded: graded,
-                        score: score,
-                        maxScore: totalQuestions
-                    });
-
-                    setIsScanning(false);
-                };
-                img.src = imageSrc;
-            };
-
-            const saveResult = () => {
-                if (!scanResult || !selectedExamId) return;
-                const newSub = {
-                    id: generateId(),
-                    examId: selectedExamId,
-                    studentId: scanResult.student?.id || 'unknown',
-                    rollScanned: scanResult.roll,
-                    answers: scanResult.answers,
-                    score: scanResult.score,
-                    maxScore: scanResult.maxScore,
-                    timestamp: new Date().toISOString()
-                };
-                setDb(prev => ({ ...prev, submissions: [...(prev.submissions || []), newSub] }));
-                setScanResult(null);
-                setImageSrc(null);
-                
-                if (scanMode === 'camera') startCamera(); 
-
-                alert("Scan saved locally successfully! Remember to 'Save to Google Drive' to back it up.");
-            };
-
-            const activeExam = (db.exams || []).find(e => e.id === selectedExamId);
-
-            return (
-                <div className="flex gap-8 h-[85vh]">
-                    <div className="w-80 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-fit shrink-0">
-                        <h2 className="text-xl font-bold mb-4">Scan & Grade</h2>
-                        
-                        <div className="flex bg-slate-100 p-1 rounded-lg mb-6 shrink-0">
-                            <button onClick={() => { setScanMode('upload'); setImageSrc(null); setScanResult(null); }} className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-sm font-medium rounded-md transition-colors ${scanMode === 'upload' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:bg-slate-200'}`}>
-                                <Icon name="Upload" size={16} /> Upload
-                            </button>
-                            <button onClick={() => { setScanMode('camera'); setImageSrc(null); setScanResult(null); }} className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-sm font-medium rounded-md transition-colors ${scanMode === 'camera' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:bg-slate-200'}`}>
-                                <Icon name="Camera" size={16} /> Camera
-                            </button>
-                        </div>
-
-                        <div className="space-y-4 mb-6">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Select Exam to Grade</label>
-                                <select value={selectedExamId} onChange={e => { setSelectedExamId(e.target.value); setScanResult(null); }} className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="">-- Choose Exam --</option>
-                                    {(db.exams || []).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                                </select>
-                            </div>
-
-                            {activeExam && Object.keys(activeExam.answerKey || {}).length === 0 && (
-                                <div className="p-3 bg-orange-50 text-orange-800 rounded-lg text-xs font-medium border border-orange-200">
-                                    ⚠️ No Answer Key found for this exam. It will be scanned but the score will be 0. Add an answer key in the Templates tab.
-                                </div>
-                            )}
-
-                            {scanMode === 'upload' && (
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Upload OMR Image</label>
-                                    <input type="file" accept="image/*" onChange={handleFileChange} disabled={!selectedExamId} className="w-full text-sm border p-2 rounded-lg file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-                                </div>
-                            )}
-
-                            {scanMode === 'camera' && imageSrc && (
-                                <button onClick={() => { setImageSrc(null); setScanResult(null); startCamera(); }} className="w-full bg-slate-100 text-slate-700 py-2 rounded-lg font-medium hover:bg-slate-200 transition-colors flex justify-center items-center gap-2">
-                                    <Icon name="RefreshCw" size={16}/> Retake Photo
-                                </button>
-                            )}
-
-                            <button onClick={processScan} disabled={!imageSrc || isScanning} className="w-full bg-slate-900 text-white py-2 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 flex justify-center items-center gap-2 transition-colors">
-                                {isScanning ? 'Processing...' : <><Icon name="Scan" size={16}/> Process & Grade</>}
-                            </button>
-                        </div>
-
-                        {scanResult && (
-                            <div className="border-t pt-4">
-                                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
-                                    <Icon name="CheckCircle" size={18} className="text-green-500" /> Results
-                                </h3>
-                                
-                                <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-4 text-center">
-                                    <p className="text-xs font-bold text-slate-500 uppercase">Final Grade</p>
-                                    <p className="text-3xl font-black text-blue-700">{scanResult.score} <span className="text-lg text-blue-400">/ {scanResult.maxScore}</span></p>
-                                    <p className="text-sm font-bold text-blue-600">{Math.round((scanResult.score / Math.max(scanResult.maxScore, 1)) * 100)}%</p>
-                                </div>
-
-                                <div className="space-y-2 text-sm mb-4">
-                                    <div className="flex justify-between border-b pb-1">
-                                        <span className="text-slate-500">Scanned Roll No:</span>
-                                        <span className="font-mono font-bold">{scanResult.roll}</span>
-                                    </div>
-                                    <div className="flex justify-between border-b pb-1">
-                                        <span className="text-slate-500">Student Match:</span>
-                                        <span className={`font-bold ${scanResult.student ? 'text-green-600' : 'text-red-500'}`}>
-                                            {scanResult.student ? scanResult.student.name : 'Unregistered Roll No'}
-                                        </span>
-                                    </div>
-                                </div>
-                                <button onClick={saveResult} className="w-full bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition-colors">Save Record</button>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex-1 bg-slate-200 rounded-2xl border border-slate-300 shadow-inner overflow-hidden flex flex-col items-center justify-center relative min-h-[500px]">
-                        
-                        {scanMode === 'camera' && !imageSrc ? (
-                            <div className="relative w-full h-full bg-slate-900 flex flex-col items-center justify-center overflow-hidden">
-                                
-                                <video ref={videoRef} autoPlay playsInline className={`max-w-full max-h-full object-contain ${isCameraOn ? 'block' : 'hidden'}`}></video>
-                                
-                                {!isCameraOn && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-slate-400 z-10">
-                                        <Icon name="VideoOff" size={48} className="opacity-50 mb-4" />
-                                        <button onClick={startCamera} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2">
-                                            Turn On Camera
-                                        </button>
-                                        <p className="text-sm mt-4 max-w-xs text-center">Enable your camera to scan OMR sheets directly from your device.</p>
-                                    </div>
-                                )}
-
-                                {isCameraOn && (
-                                    <>
-                                        {/* Camera Alignment Guides Overlay */}
-                                        <div className="absolute inset-0 pointer-events-none p-6 flex flex-col justify-center z-10">
-                                            <div className="w-full h-full border-[6px] border-blue-500/50 rounded-lg relative flex items-center justify-center overflow-hidden shadow-[0_0_0_9999px_rgba(0,0,0,0.4)]">
-                                                <div className="absolute top-0 left-0 w-12 h-12 border-t-[6px] border-l-[6px] border-white"></div>
-                                                <div className="absolute top-0 right-0 w-12 h-12 border-t-[6px] border-r-[6px] border-white"></div>
-                                                <div className="absolute bottom-0 left-0 w-12 h-12 border-b-[6px] border-l-[6px] border-white"></div>
-                                                <div className="absolute bottom-0 right-0 w-12 h-12 border-b-[6px] border-r-[6px] border-white"></div>
-                                                <p className="text-white bg-black/50 px-4 py-2 rounded-lg backdrop-blur text-sm font-bold tracking-wider">Align paper borders inside frame</p>
-                                            </div>
-                                        </div>
-
-                                        <button onClick={stopCamera} className="absolute top-4 right-4 bg-red-600/80 hover:bg-red-600 text-white p-3 rounded-full shadow-lg backdrop-blur transition z-20" title="Turn Off Camera">
-                                            <Icon name="Power" size={20} />
-                                        </button>
-
-                                        {selectedExamId ? (
-                                            <button onClick={capturePhoto} className="absolute bottom-8 bg-blue-600 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-blue-700 transition flex items-center gap-2 border-2 border-white z-20">
-                                                <Icon name="Camera" /> Capture Document
-                                            </button>
-                                        ) : (
-                                            <div className="absolute bottom-8 bg-slate-800/80 text-white px-6 py-2 rounded-full font-medium shadow-lg backdrop-blur text-sm z-20">
-                                                Select an Exam first to enable capture
-                                            </div>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-                        ) : imageSrc ? (
-                            <div className="relative inline-block border-4 border-black shadow-xl my-4 bg-white" style={{ maxHeight: '90%', maxWidth: '90%' }}>
-                                {/* Show Raw Image before scan is complete, and Overlay Canvas after scan */}
-                                <img src={imageSrc} alt="Scanned OMR" className={`max-w-full max-h-[80vh] object-contain block bg-white ${scanResult ? 'hidden' : 'block'}`} />
-                                <canvas ref={canvasRef} className={`max-w-full max-h-[80vh] object-contain block bg-white ${scanResult ? 'block' : 'hidden'}`}></canvas>
-                            </div>
-                        ) : (
-                            <p className="text-slate-400 font-medium p-4 text-center">Select an exam and upload an image to begin.</p>
-                        )}
-                        
-                        {/* Hidden strict-pixel layout template used exclusively for extracting coordinates */}
-                        {activeExam && (
-                            <div style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', top: '-20000px', left: '-20000px' }} ref={hiddenTemplateRef}>
-                                <OMRSheet config={activeExam.templateConfig} title="CALIB" />
-                            </div>
-                        )}
-                    </div>
+                <button 
+                  onClick={syncRecordsToGoogle}
+                  disabled={isLoading || unsyncedRecords.length === 0}
+                  className="mt-6 w-full bg-white text-indigo-700 hover:bg-indigo-50 disabled:bg-indigo-400 disabled:text-indigo-200 py-3 rounded-lg font-bold shadow-sm transition-colors flex justify-center items-center gap-2"
+                >
+                  {isLoading ? <RefreshCw className="animate-spin" size={18} /> : <CloudLightning size={18} />}
+                  {isLoading ? 'Syncing...' : 'Push to Drive'}
+                </button>
+              </div>
+            </div>
+            {/* Render List of Unsynced Items */}
+            <div className="space-y-2">
+              {unsyncedRecords.map((rec) => (
+                <div key={rec.id} className="bg-white p-3 rounded-lg border border-gray-100 flex justify-between items-center text-sm shadow-sm">
+                  <span className="font-bold text-gray-800">{rec.displayName}</span>
+                  <span className="text-gray-400 text-xs">{rec.timestamp.split(',')[1]}</span>
                 </div>
-            );
-        };
+              ))}
+            </div>
+          </div>
+        )}
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+        {/* --- TAB: SETTINGS --- */}
+        {activeTab === 'settings' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4">
+              <div className="flex items-center gap-2 text-indigo-700 border-b border-gray-100 pb-3">
+                <Settings size={20} />
+                <h2 className="font-bold">App Configuration</h2>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">GAS Web App URL</label>
+                <input 
+                  type="url" 
+                  placeholder="https://script.google.com/macros/s/..."
+                  value={gasUrl}
+                  onChange={(e) => setGasUrl(e.target.value)}
+                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-xs font-mono"
+                />
+              </div>
+
+              <button 
+                onClick={saveSettings}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors text-sm"
+              >
+                Save Script URL
+              </button>
+
+              {currentUser && (
+                <div className="pt-4 border-t border-gray-100">
+                   <button onClick={logout} className="w-full flex items-center justify-center gap-2 bg-red-50 text-red-600 hover:bg-red-100 py-2.5 rounded-lg font-medium transition-colors text-sm">
+                     <LogOut size={16}/> Log Out Account
+                   </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {currentUser && (
+        <nav className="bg-white border-t border-gray-200 flex justify-around p-2 pb-safe absolute bottom-0 w-full z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+          <button onClick={() => setActiveTab('scan')} className={`flex flex-col items-center p-2 min-w-[60px] transition-colors rounded-xl ${activeTab === 'scan' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}>
+            <Smartphone size={22} className="mb-1" />
+            <span className="text-[10px] font-semibold">Scan</span>
+          </button>
+          <button onClick={() => setActiveTab('manage')} className={`flex flex-col items-center p-2 min-w-[60px] transition-colors rounded-xl ${activeTab === 'manage' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}>
+            <Users size={22} className="mb-1" />
+            <span className="text-[10px] font-semibold">Manage</span>
+          </button>
+          <button onClick={() => setActiveTab('sync')} className={`flex flex-col items-center p-2 min-w-[60px] transition-colors rounded-xl relative ${activeTab === 'sync' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}>
+            {unsyncedRecords.length > 0 && <span className="absolute top-1 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>}
+            <CloudLightning size={22} className="mb-1" />
+            <span className="text-[10px] font-semibold">Sync</span>
+          </button>
+          <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center p-2 min-w-[60px] transition-colors rounded-xl ${activeTab === 'settings' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}>
+            <Settings size={22} className="mb-1" />
+            <span className="text-[10px] font-semibold">Setup</span>
+          </button>
+        </nav>
+      )}
+
+    </div>
+  );
+}
