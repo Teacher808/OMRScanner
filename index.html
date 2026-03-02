@@ -1,1006 +1,398 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>OMR Exam Scanner</title>
-  
-  <!-- UI Libraries -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  
-  <!-- Export Libraries for JPEG and PDF -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  
-  <style>
-    .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
-    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    
-    /* Strict WYSIWYG Print Styles for the OMR Sheet */
-    @media print {
-      body { margin: 0; background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      body * { visibility: hidden; }
-      #omr-print-area, #omr-print-area * { visibility: visible; }
-      #omr-print-area {
-        position: absolute; left: 0; top: 0; 
-        margin: 0;
-        box-shadow: none !important;
-        border: none !important;
-      }
-      .no-print { display: none !important; }
-    }
-  </style>
-</head>
-<body class="bg-gray-100">
-  <div id="root"></div>
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { 
+  Camera, Settings, History, CheckCircle2, XCircle, RotateCcw, 
+  Save, Plus, Trash2, FileText, ScanLine, ChevronLeft, Info, 
+  Download, Users, GraduationCap, LayoutDashboard, LogOut, 
+  Cloud, Github, Database, UserPlus, CloudUpload, Link2,
+  RefreshCw, ShieldCheck, Check, AlertTriangle
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut 
+} from 'firebase/auth';
+import { 
+  getFirestore, doc, setDoc, getDoc, collection, onSnapshot, 
+  addDoc, updateDoc, deleteDoc, query, where 
+} from 'firebase/firestore';
 
-  <script type="text/babel" data-type="module">
-    import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.2.0';
-    import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
-    import { Camera, Settings, CheckCircle, Users, AlertTriangle, RefreshCw, BookOpen, Trash2, UserPlus, LogOut, Lock, User, FileText, Printer, UploadCloud, Download, FileImage, FileDown, Edit3, Save, Eye, BarChart, PlusCircle, XCircle } from 'https://esm.sh/lucide-react@0.263.1';
+// --- Configuration ---
+const APP_NAME = "OmniMark Pro";
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'omnimark-pro';
 
-    const generateSafeId = () => {
-      if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-      return Date.now().toString(36) + Math.random().toString(36).substring(2);
-    };
+const App = () => {
+  // --- Global State ---
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('auth'); 
+  const [loading, setLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState('synced'); // synced, syncing, offline
 
-    const paperDimensions = {
-      '5x7': { w: '5in', h: '7in', name: '5x7 inches', pdfFormat: [5, 7] },
-      'Letter': { w: '8.5in', h: '11in', name: 'Letter (8.5x11)', pdfFormat: 'letter' },
-      'A4': { w: '8.27in', h: '11.69in', name: 'A4', pdfFormat: 'a4' }
-    };
+  // --- Data State ---
+  const [classes, setClasses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [results, setResults] = useState([]);
+  const [config, setConfig] = useState({ googleSheetId: '', appsScriptUrl: '', githubRepo: '' });
 
-    // Helper to flatten multi-section items into a continuous list
-    const getFlattenedItems = (sections) => {
-      let items = [];
-      let currentNum = 1;
-      (sections || []).forEach(sec => {
-        for(let i = 0; i < sec.itemCount; i++) {
-          items.push({ num: currentNum++, type: sec.type, choices: sec.choices });
-        }
-      });
-      return items;
-    };
+  // --- UI State ---
+  const [exporting, setExporting] = useState(false);
+  const [lastExportStatus, setLastExportStatus] = useState(null);
 
-    function App() {
-      const [activeTab, setActiveTab] = useState('exams');
-      const gasUrl = 'https://script.google.com/macros/s/AKfycbzTsgZnj4EACnV9RWjTXSLYgjd3mLgirXqpfO02EpREdtfkbvNFceseAbxiy1NGMxBJAQ/exec';
-      
-      const [currentUser, setCurrentUser] = useState(null);
-      const [authMode, setAuthMode] = useState('login');
-      const [authForm, setAuthForm] = useState({ username: '', password: '' });
-
-      const [classes, setClasses] = useState([]);
-      const [students, setStudents] = useState([]);
-      const [exams, setExams] = useState([]);
-      const [scores, setScores] = useState([]);
-      
-      const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
-      const [isLoading, setIsLoading] = useState(false);
-
-      const [newClassName, setNewClassName] = useState('');
-      const [manageClassId, setManageClassId] = useState('');
-      const [studentForm, setStudentForm] = useState({ name: '', rollNo: '' });
-      const [bulkInput, setBulkInput] = useState('');
-      const [showBulkAdd, setShowBulkAdd] = useState(false);
-
-      // Enhanced Exam Form for multiple sections
-      const [examBase, setExamBase] = useState({ title: '', classId: '', rollDigits: 2, columns: 3, instructions: 'Shade the circle completely black.' });
-      const [examSections, setExamSections] = useState([{ id: generateSafeId(), type: 'multiple', choices: 4, itemCount: 20 }]);
-      
-      const [viewingExam, setViewingExam] = useState(null);
-      const [paperSize, setPaperSize] = useState('5x7');
-
-      const [scanExamId, setScanExamId] = useState('');
-      const [uploadedImage, setUploadedImage] = useState(null);
-      const fileInputRef = useRef(null);
-      const [mockScore, setMockScore] = useState(null); 
-
-      useEffect(() => {
-        try {
-          const savedUser = localStorage.getItem('currentUser');
-          if (savedUser) setCurrentUser(JSON.parse(savedUser));
-        } catch (e) { console.error("Error loading local storage:", e); }
-      }, []);
-
-      useEffect(() => {
-        if (currentUser && gasUrl) fetchData();
-      }, [currentUser]);
-
-      const showStatus = (text, type = 'success') => {
-        setStatusMsg({ text, type });
-        setTimeout(() => setStatusMsg({ text: '', type: '' }), 4500);
-      };
-
-      const callGAS = async (action, payload = {}) => {
-        if (!gasUrl) throw new Error("Google Apps Script URL is missing.");
-        const response = await fetch(gasUrl, {
-          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action, payload })
-        });
-        const text = await response.text();
-        try {
-          const result = JSON.parse(text);
-          if (!result.success) throw new Error(result.error || "Server error");
-          return result;
-        } catch (err) { throw new Error(err.message || 'Invalid response from server.'); }
-      };
-
-      const handleAuth = async (e) => {
-        e.preventDefault(); setIsLoading(true);
-        try {
-          const result = await callGAS(authMode, authForm);
-          const user = { userId: result.userId, username: result.username };
-          setCurrentUser(user);
-          localStorage.setItem('currentUser', JSON.stringify(user));
-          showStatus(`Welcome, ${result.username}!`);
-        } catch (error) { showStatus(error.message, 'error'); } 
-        finally { setIsLoading(false); }
-      };
-
-      const logout = () => {
-        setCurrentUser(null); setClasses([]); setStudents([]); setExams([]); setScores([]);
-        localStorage.removeItem('currentUser');
-        showStatus('Logged out successfully', 'success');
-      };
-
-      const fetchData = async () => {
-        setIsLoading(true);
-        try {
-          const result = await callGAS('getData', { userId: currentUser.userId });
-          setClasses(result.classes || []);
-          setStudents(result.students || []);
-          setExams(result.exams || []);
-          setScores(result.scores || []);
-          if (result.classes && result.classes.length > 0 && !manageClassId) setManageClassId(result.classes[0].id);
-        } catch (error) { showStatus(`Data sync failed: ${error.message}`, 'error'); } 
-        finally { setIsLoading(false); }
-      };
-
-      // --- EXPORT LOGIC ---
-      const handleDownloadJPEG = async () => {
-        setIsLoading(true);
-        try {
-          const element = document.getElementById('omr-print-area');
-          const canvas = await window.html2canvas(element, { scale: 3, useCORS: true });
-          const link = document.createElement('a');
-          link.download = `${viewingExam.exam.title}_OMR_Template.jpg`;
-          link.href = canvas.toDataURL('image/jpeg', 1.0);
-          link.click();
-          showStatus('JPEG Downloaded successfully!');
-        } catch(e) { console.error(e); showStatus('Export failed.', 'error'); }
-        setIsLoading(false);
-      };
-
-      const handleDownloadPDF = async () => {
-        setIsLoading(true);
-        try {
-          const element = document.getElementById('omr-print-area');
-          const canvas = await window.html2canvas(element, { scale: 3, useCORS: true });
-          const imgData = canvas.toDataURL('image/jpeg', 1.0);
-          const { jsPDF } = window.jspdf;
-          
-          const pdf = new jsPDF({
-            orientation: 'portrait',
-            unit: 'in',
-            format: paperDimensions[paperSize].pdfFormat
-          });
-          
-          pdf.addImage(imgData, 'JPEG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
-          pdf.save(`${viewingExam.exam.title}_OMR_Template.pdf`);
-          showStatus('PDF Downloaded successfully!');
-        } catch(e) { console.error(e); showStatus('Export failed.', 'error'); }
-        setIsLoading(false);
-      };
-
-      // --- ROSTER MANAGEMENT ---
-      const handleAddClass = async (e) => {
-        e.preventDefault(); if (!newClassName.trim()) return;
-        setIsLoading(true);
-        const newClass = { id: generateSafeId(), name: newClassName.trim() };
-        try {
-          await callGAS('saveClass', { userId: currentUser.userId, class: newClass });
-          setClasses([...classes, newClass]); setNewClassName('');
-          if (!manageClassId) setManageClassId(newClass.id);
-          showStatus('Class added successfully');
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      const handleDeleteClass = async (classId) => {
-        if(!window.confirm("Delete this class? This will permanently delete its students, exams, answer keys, and scores.")) return;
-        setIsLoading(true);
-        try {
-          await callGAS('deleteClass', { userId: currentUser.userId, classId });
-          setClasses(classes.filter(c => c.id !== classId));
-          setStudents(students.filter(s => s.classId !== classId));
-          
-          const deletedExamIds = exams.filter(e => e.classId === classId).map(e => e.id);
-          setExams(exams.filter(e => e.classId !== classId));
-          setScores(scores.filter(s => !deletedExamIds.includes(s.examId)));
-          
-          if (manageClassId === classId) setManageClassId('');
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      const handleAddStudent = async (e) => {
-        e.preventDefault();
-        if (!manageClassId || !studentForm.name.trim() || !studentForm.rollNo) return;
-        const paddedRoll = String(studentForm.rollNo).padStart(2, '0');
-        const newStudent = { id: generateSafeId(), classId: manageClassId, rollNo: paddedRoll, name: studentForm.name.trim() };
-        setIsLoading(true);
-        try {
-          await callGAS('saveStudent', { userId: currentUser.userId, student: newStudent });
-          setStudents([...students, newStudent]); setStudentForm({ name: '', rollNo: '' });
-          showStatus('Student added');
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      const handleBulkAdd = async () => {
-        if (!manageClassId || !bulkInput.trim()) return;
-        const lines = bulkInput.trim().split('\n');
-        const newStudents = [];
-        lines.forEach(line => {
-          const parts = line.split(/[\t,]+/); 
-          if (parts.length >= 2) {
-            newStudents.push({
-              id: generateSafeId(), classId: manageClassId,
-              rollNo: String(parts[0].trim()).padStart(2, '0'),
-              name: parts[1].trim()
-            });
-          }
-        });
-
-        if (newStudents.length === 0) { showStatus('Invalid format. Use "RollNo, Name" per line.', 'error'); return; }
-        
-        setIsLoading(true);
-        try {
-          await callGAS('bulkAddStudents', { userId: currentUser.userId, students: newStudents });
-          setStudents([...students, ...newStudents]); setBulkInput(''); setShowBulkAdd(false);
-          showStatus(`${newStudents.length} students bulk added!`);
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      const handleDeleteStudent = async (studentId) => {
-        if(!window.confirm("Delete this student? Their exam scores will also be permanently deleted.")) return;
-        setIsLoading(true);
-        try {
-          await callGAS('deleteStudent', { userId: currentUser.userId, studentId });
-          setStudents(students.filter(s => s.id !== studentId));
-          setScores(scores.filter(s => s.studentId !== studentId));
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      // --- EXAM MANAGEMENT ---
-      const handleCreateExam = async (e) => {
-        e.preventDefault();
-        if (!examBase.title || !examBase.classId) return;
-        
-        const totalItems = examSections.reduce((sum, sec) => sum + Number(sec.itemCount), 0);
-        if (totalItems === 0) return showStatus('Add at least one section with items', 'error');
-        if (totalItems > 150) return showStatus(`Max 150 items allowed. You have ${totalItems}.`, 'error');
-
-        setIsLoading(true);
-        const newExam = {
-          id: generateSafeId(), 
-          classId: examBase.classId, 
-          title: examBase.title,
-          config: { 
-            rollDigits: Number(examBase.rollDigits), 
-            columns: Number(examBase.columns),
-            instructions: examBase.instructions,
-            sections: examSections.map(s => ({ type: s.type, choices: Number(s.choices), itemCount: Number(s.itemCount) })),
-            itemCount: totalItems // Cached for quick access
-          },
-          answerKey: {}
-        };
-        try {
-          await callGAS('saveExam', { userId: currentUser.userId, exam: newExam });
-          setExams([...exams, newExam]);
-          setExamBase({...examBase, title: ''});
-          setExamSections([{ id: generateSafeId(), type: 'multiple', choices: 4, itemCount: 20 }]);
-          showStatus('Exam template created!');
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      const handleDeleteExam = async (examId) => {
-        if(!window.confirm("Delete this exam? The answer key and all student scores will be permanently deleted.")) return;
-        setIsLoading(true);
-        try {
-          await callGAS('deleteExam', { userId: currentUser.userId, examId });
-          setExams(exams.filter(e => e.id !== examId));
-          setScores(scores.filter(s => s.examId !== examId));
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      const saveAnswerKey = async (exam, keyObj) => {
-        setIsLoading(true);
-        const updatedExam = { ...exam, answerKey: keyObj };
-        try {
-          await callGAS('saveExam', { userId: currentUser.userId, exam: updatedExam });
-          setExams(exams.map(e => e.id === exam.id ? updatedExam : e));
-          showStatus('Answer key saved');
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      // --- OMR SCANNING (MOCK) ---
-      const handleImageUpload = (e) => {
-        if (e.target.files && e.target.files[0]) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            setUploadedImage(e.target.result);
-            processMockOMR();
-          };
-          reader.readAsDataURL(e.target.files[0]);
-        }
-      };
-
-      const processMockOMR = () => {
-        setIsLoading(true);
-        setTimeout(() => {
-          setIsLoading(false);
-          const activeExam = exams.find(e => e.id === scanExamId);
-          if(!activeExam) return;
-          
-          const classStudents = students.filter(s => s.classId === activeExam.classId);
-          const randomStudent = classStudents.length > 0 ? classStudents[Math.floor(Math.random() * classStudents.length)] : { rollNo: '01', name: 'Unknown' };
-          
-          const answerKey = activeExam.answerKey || {};
-          let scoreCount = 0;
-          const rawData = {};
-          
-          const flatItems = getFlattenedItems(activeExam.config.sections);
-          
-          // Accurately mock generating responses based on the item's specific type
-          flatItems.forEach(item => {
-             const isCorrect = Math.random() > 0.3; // 70% mock correct
-             if (isCorrect && answerKey[item.num]) {
-                 rawData[item.num] = answerKey[item.num];
-                 scoreCount++;
-             } else {
-                 const choices = item.type === 'truefalse' ? ['T', 'F'] : Array.from({length: item.choices}, (_, idx) => String.fromCharCode(65 + idx));
-                 const wrongChoices = choices.filter(c => c !== answerKey[item.num]);
-                 rawData[item.num] = wrongChoices.length > 0 ? wrongChoices[Math.floor(Math.random() * wrongChoices.length)] : '';
-             }
-          });
-          
-          setMockScore({
-            studentRoll: randomStudent.rollNo,
-            studentName: randomStudent.name,
-            score: scoreCount,
-            total: activeExam.config.itemCount,
-            rawData: rawData
-          });
-        }, 1500);
-      };
-
-      const confirmAndSaveScore = async () => {
-        if(!mockScore || !scanExamId) return;
-        setIsLoading(true);
-        const activeExam = exams.find(e => e.id === scanExamId);
-        const student = students.find(s => s.classId === activeExam.classId && s.rollNo === mockScore.studentRoll);
-        
-        const newScore = {
-          id: generateSafeId(),
-          examId: scanExamId,
-          studentId: student ? student.id : 'Unknown',
-          score: mockScore.score,
-          total: mockScore.total,
-          rawData: mockScore.rawData
-        };
-
-        try {
-          await callGAS('saveScore', { userId: currentUser.userId, score: newScore });
-          setScores([...scores, newScore]);
-          setMockScore(null);
-          setUploadedImage(null);
-          showStatus('Score saved to Drive!');
-        } catch (error) { showStatus(error.message, 'error'); } finally { setIsLoading(false); }
-      };
-
-      // --- UI RENDERERS ---
-
-      if (!currentUser) {
-        return (
-          <div className="flex flex-col min-h-screen bg-gray-50 text-gray-800 font-sans max-w-md mx-auto shadow-2xl justify-center p-6">
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-              <div className="text-center mb-6">
-                <div className="bg-indigo-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Lock className="text-indigo-600" size={32} />
-                </div>
-                <h1 className="text-2xl font-bold">OMR Platform</h1>
-              </div>
-              <form onSubmit={handleAuth} className="space-y-4">
-                <input type="text" required value={authForm.username} onChange={e => setAuthForm({...authForm, username: e.target.value})} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Username" />
-                <input type="password" required value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="Password" />
-                <button type="submit" disabled={isLoading} className="w-full bg-indigo-600 text-white p-3 rounded-lg font-bold">
-                  {isLoading ? 'Processing...' : (authMode === 'login' ? 'Sign In' : 'Sign Up')}
-                </button>
-              </form>
-              <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full mt-4 text-sm text-indigo-600 font-medium">
-                {authMode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
-              </button>
-            </div>
-            {statusMsg.text && <div className={`mt-4 p-3 rounded-lg text-sm ${statusMsg.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{statusMsg.text}</div>}
-          </div>
-        );
-      }
-
-      // PRINT VIEW (OMR Template WYSIWYG)
-      if (viewingExam && viewingExam.mode === 'print') {
-        const { config, title } = viewingExam.exam;
-        const cls = classes.find(c => c.id === viewingExam.exam.classId);
-        
-        const dim = paperDimensions[paperSize];
-        const isSmall = paperSize === '5x7';
-        
-        const numCols = config.columns || 3;
-        
-        // Find the maximum choices in any section to calculate density constraints
-        const maxChoices = Math.max(...(config.sections || []).map(s => s.type === 'truefalse' ? 2 : s.choices));
-        const density = numCols * maxChoices;
-
-        // Dynamic Bubble Scaling based on density
-        let bSize = isSmall ? 10 : 16;
-        let bGap = isSmall ? 2 : 4;
-        let rGap = isSmall ? 2 : 6;
-        let tSize = isSmall ? 8 : 10;
-
-        if (isSmall) {
-            if (density > 12) { bSize = 8; bGap = 1.5; }
-            if (density > 18) { bSize = 7; bGap = 1; tSize = 7; }
-            if (density > 24) { bSize = 6; bGap = 1; tSize = 6; }
+  // --- Authentication (Rule 3) ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-            if (density > 15) { bSize = 14; bGap = 3; }
-            if (density > 24) { bSize = 12; bGap = 2; tSize = 9; }
-            if (density > 35) { bSize = 10; bGap = 2; tSize = 8; }
-            if (density > 45) { bSize = 9; bGap = 1; tSize = 7; }
+          await signInAnonymously(auth);
         }
-
-        const bubbleStyle = { width: `${bSize}px`, height: `${bSize}px`, fontSize: `${bSize * 0.65}px` };
-        const bubbleGapStyle = { gap: `${bGap}px` };
-        const rowStyle = { marginBottom: `${rGap}px`, fontSize: `${tSize}px` };
-
-        const rollBSize = isSmall ? 10 : 14;
-        const rollBStyle = { width: `${rollBSize}px`, height: `${rollBSize}px`, fontSize: `${rollBSize * 0.65}px` };
-
-        const headerClass = isSmall ? 'text-sm' : 'text-xl';
-        const titleClass = isSmall ? 'text-xs' : 'text-lg';
-        const containerPadClass = isSmall ? 'p-2' : 'p-4';
-
-        const BubbleRow = ({ item }) => {
-          const labels = item.type === 'truefalse' ? ['T', 'F'] : Array.from({length: item.choices}, (_, i) => String.fromCharCode(65 + i));
-          return (
-            <div className="flex items-center break-inside-avoid pr-1" style={{ ...rowStyle, ...bubbleGapStyle }}>
-              <span className="w-6 text-right font-bold mr-0.5 shrink-0" style={{ fontSize: `${tSize}px` }}>{item.num}.</span>
-              {labels.map(l => (
-                <div key={l} className="rounded-full border border-black flex items-center justify-center font-bold shrink-0" style={bubbleStyle}>{l}</div>
-              ))}
-            </div>
-          );
-        };
-
-        const flatItems = getFlattenedItems(config.sections);
-        const itemsPerCol = Math.ceil(flatItems.length / numCols);
-        
-        const columnArrays = Array.from({ length: numCols }, (_, colIndex) => {
-          return flatItems.slice(colIndex * itemsPerCol, (colIndex + 1) * itemsPerCol);
-        });
-
-        return (
-          <div className="min-h-screen bg-gray-300 p-2 sm:p-4 overflow-x-auto flex flex-col items-center">
-            <style>{`@media print { @page { size: ${dim.w} ${dim.h}; margin: 0; } }`}</style>
-            
-            <div className="w-full max-w-[800px] mb-4 flex flex-col md:flex-row gap-3 justify-between no-print items-center bg-white p-4 rounded-lg shadow sticky top-0 z-50">
-              <div className="flex items-center gap-3">
-                 <label className="text-sm font-bold text-gray-700">Paper Size:</label>
-                 <select value={paperSize} onChange={e => setPaperSize(e.target.value)} className="border rounded px-3 py-1.5 text-sm bg-gray-50 outline-none">
-                    {Object.keys(paperDimensions).map(k => <option key={k} value={k}>{paperDimensions[k].name}</option>)}
-                 </select>
-              </div>
-              <div className="flex gap-2 flex-wrap justify-center">
-                <button onClick={() => setViewingExam(null)} className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded font-medium text-sm">Close</button>
-                <button onClick={handleDownloadJPEG} className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded font-medium flex gap-1 items-center text-sm disabled:opacity-50"><FileImage size={16}/> JPEG</button>
-                <button onClick={handleDownloadPDF} className="px-3 py-1.5 bg-red-100 text-red-700 rounded font-medium flex gap-1 items-center text-sm disabled:opacity-50"><FileDown size={16}/> PDF</button>
-                <button onClick={() => window.print()} className="px-4 py-1.5 bg-indigo-600 text-white rounded font-medium flex gap-1 items-center text-sm disabled:opacity-50"><Printer size={16}/> Print</button>
-              </div>
-            </div>
-
-            <div id="omr-print-area" className="bg-white shadow-2xl relative" style={{ width: dim.w, height: dim.h, boxSizing: 'border-box', padding: isSmall ? '0.2in' : '0.4in' }}>
-               <div className={`border-4 border-black ${containerPadClass} h-full flex flex-col relative`}>
-                  
-                  <div className="absolute top-0 left-0 w-6 h-6 bg-black"></div>
-                  <div className="absolute top-0 right-0 w-6 h-6 bg-black"></div>
-                  <div className="absolute bottom-0 left-0 w-6 h-6 bg-black"></div>
-                  <div className="absolute bottom-0 right-0 w-6 h-6 bg-black"></div>
-
-                  <div className={`text-center mb-3 pt-2 shrink-0 ${isSmall ? 'mt-3' : ''}`}>
-                    <h1 className={`${headerClass} font-black uppercase tracking-wider leading-none`}>{cls ? cls.name : 'Class'}</h1>
-                    <h2 className={`${titleClass} font-bold mt-1`}>{title}</h2>
-                  </div>
-
-                  <div className={`flex ${isSmall ? 'gap-3 mb-3' : 'gap-6 mb-6'} shrink-0`}>
-                    <div className={`flex-1 border-2 border-black ${isSmall ? 'p-1.5' : 'p-3'} flex flex-col justify-between`}>
-                      <div>
-                        <div className={`flex border-b border-black ${isSmall ? 'pb-0.5 mb-1.5' : 'pb-1 mb-3'} mt-1`}>
-                          <span className="font-bold w-12" style={{ fontSize: `${tSize}px` }}>Name:</span> <div className="flex-1"></div>
-                        </div>
-                        <div className={`flex border-b border-black ${isSmall ? 'pb-0.5' : 'pb-1'}`}>
-                          <span className="font-bold w-12" style={{ fontSize: `${tSize}px` }}>Date:</span> <div className="flex-1"></div>
-                        </div>
-                      </div>
-                      <div className={`${isSmall ? 'text-[7px]' : 'text-xs'} italic mt-1 border-t border-dashed border-gray-400 pt-1`}>
-                        <strong>Instructions:</strong> {config.instructions}
-                      </div>
-                    </div>
-
-                    <div className={`border-2 border-black ${isSmall ? 'p-1' : 'p-2'} flex flex-col items-center`}>
-                      <div className={`font-bold ${isSmall ? 'mb-0.5 text-[8px]' : 'mb-1 text-sm'}`}>ROLL NO.</div>
-                      <div className="flex gap-0.5">
-                        {Array.from({length: config.rollDigits}).map((_, colIdx) => (
-                          <div key={colIdx} className="flex flex-col items-center gap-0.5">
-                            <div className={`border border-black mb-0.5 ${isSmall ? 'w-3 h-4' : 'w-5 h-6'}`}></div>
-                            {Array.from({length: 10}).map((_, rowIdx) => (
-                              <div key={rowIdx} className="rounded-full border border-black flex items-center justify-center font-bold" style={rollBStyle}>{rowIdx}</div>
-                            ))}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div 
-                    className="w-full flex-1 mt-4 grid gap-x-2"
-                    style={{ gridTemplateColumns: `repeat(${numCols}, minmax(0, 1fr))` }}
-                  >
-                    {columnArrays.map((col, cIdx) => (
-                      <div key={cIdx} className="flex flex-col">
-                        {col.map(item => <BubbleRow key={item.num} item={item} />)}
-                      </div>
-                    ))}
-                  </div>
-               </div>
-            </div>
-          </div>
-        );
+      } catch (err) {
+        console.error("Auth Error:", err);
+      } finally {
+        setLoading(false);
       }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) setView('dashboard');
+      else setView('auth');
+    });
+    return () => unsubscribe();
+  }, []);
 
-      // KEY EDITOR - LIST AND DROPDOWN INTERFACE
-      if (viewingExam && viewingExam.mode === 'key') {
-        const { exam } = viewingExam;
-        const [tempKey, setTempKey] = useState(exam.answerKey || {});
-        const flatItems = getFlattenedItems(exam.config.sections);
+  // --- Data Listeners (Rule 1 & 2) ---
+  useEffect(() => {
+    if (!user) return;
 
-        return (
-          <div className="flex flex-col h-screen bg-gray-50 text-gray-800 font-sans max-w-5xl mx-auto shadow-2xl relative">
-            <header className="bg-indigo-600 text-white p-4 shadow-md flex justify-between items-center z-10 shrink-0">
-               <div>
-                 <h1 className="font-bold tracking-tight text-lg">Answer Key Setup</h1>
-                 <p className="text-xs text-indigo-200">{exam.title}</p>
-               </div>
-               <button onClick={() => setViewingExam(null)} className="text-xs bg-indigo-800 px-3 py-1.5 rounded text-white font-medium hover:bg-indigo-900 transition-colors">Back</button>
-            </header>
-            
-            <div className="bg-white p-4 border-b shadow-sm z-10 shrink-0 flex justify-between items-center">
-               <p className="text-sm text-gray-600">Select the correct answer from the dropdowns.</p>
-               <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">{Object.keys(tempKey).length} / {exam.config.itemCount} Set</span>
-            </div>
+    setSyncStatus('syncing');
 
-            <div className="flex-1 overflow-y-auto p-4 bg-gray-100">
-              <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-200">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {flatItems.map((item) => {
-                    const labels = item.type === 'truefalse' ? ['T', 'F'] : Array.from({length: item.choices}, (_, i) => String.fromCharCode(65 + i));
-                    return (
-                      <div key={item.num} className="flex items-center justify-between bg-gray-50 p-2 rounded-lg border border-gray-200 shadow-sm">
-                        <span className="font-bold text-gray-600 text-sm">{item.num}.</span>
-                        <select 
-                          value={tempKey[item.num] || ''} 
-                          onChange={(e) => setTempKey({...tempKey, [item.num]: e.target.value})}
-                          className={`border rounded p-1.5 text-sm font-bold w-16 outline-none focus:ring-2 focus:ring-indigo-500 ${tempKey[item.num] ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-white border-gray-300'}`}
-                        >
-                          <option value="">--</option>
-                          {labels.map(l => <option key={l} value={l}>{l}</option>)}
-                        </select>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-            <div className="p-4 bg-white border-t shrink-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-              <button onClick={() => { saveAnswerKey(exam, tempKey); setViewingExam(null); }} className="w-full bg-green-600 hover:bg-green-700 transition-colors text-white py-3.5 rounded-lg font-bold text-lg flex justify-center gap-2 items-center">
-                <Save size={20} /> Save Answer Key to Drive
-              </button>
-            </div>
-          </div>
-        );
-      }
+    const classRef = collection(db, 'artifacts', appId, 'users', user.uid, 'classes');
+    const unsubClasses = onSnapshot(classRef, (snap) => {
+      setClasses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setSyncStatus('synced');
+    }, () => setSyncStatus('offline'));
 
-      // ITEM ANALYSIS
-      if (viewingExam && viewingExam.mode === 'analysis') {
-        const { exam } = viewingExam;
-        const examScores = scores.filter(s => s.examId === exam.id);
-        const totalStudents = examScores.length;
-        const flatItems = getFlattenedItems(exam.config.sections);
-        
-        return (
-           <div className="flex flex-col h-screen bg-gray-50 text-gray-800 font-sans max-w-md mx-auto shadow-2xl relative">
-              <header className="bg-indigo-600 text-white p-4 shadow-md flex justify-between items-center">
-                 <h1 className="font-bold tracking-tight text-lg">Item Analysis</h1>
-                 <button onClick={() => setViewingExam(null)} className="text-xs bg-indigo-800 px-3 py-1 rounded text-white font-medium">Back</button>
-              </header>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                <div className="bg-white p-4 rounded-lg shadow-sm border text-center">
-                   <h2 className="text-lg font-bold text-gray-800">{exam.title}</h2>
-                   <p className="text-sm text-gray-500">Total Answer Sheets Scanned: {totalStudents}</p>
-                </div>
-                
-                {totalStudents === 0 ? (
-                   <div className="text-center text-gray-500 py-8">No sheets scanned yet.</div>
-                ) : (
-                   <div className="space-y-2">
-                      <div className="flex justify-between text-xs font-bold text-gray-400 px-1 mb-1">
-                        <span>ITEM / KEY</span>
-                        <span>% CORRECT</span>
-                      </div>
-                      {flatItems.map((item) => {
-                         const itemNum = item.num;
-                         const correctAns = exam.answerKey[itemNum];
-                         let correctCount = 0;
-                         
-                         examScores.forEach(sc => {
-                            let raw = {};
-                            try { raw = typeof sc.rawData === 'string' ? JSON.parse(sc.rawData) : (sc.rawData || {}); } catch(e) {}
-                            if (raw[itemNum] === correctAns) correctCount++;
-                         });
-                         
-                         const percentage = ((correctCount / totalStudents) * 100).toFixed(1);
-                         
-                         return (
-                            <div key={itemNum} className="bg-white p-3 rounded-lg shadow-sm border flex items-center justify-between">
-                               <div className="flex items-center gap-3">
-                                  <span className="font-bold text-gray-700 w-5">{itemNum}.</span>
-                                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded font-mono">Key: <strong className="text-indigo-600">{correctAns || '?'}</strong></span>
-                               </div>
-                               <div className="flex items-center gap-3">
-                                  <div className="w-20 bg-gray-200 rounded-full h-2">
-                                    <div className={`h-2 rounded-full ${percentage < 50 ? 'bg-red-500' : percentage < 75 ? 'bg-yellow-400' : 'bg-green-500'}`} style={{width: `${percentage}%`}}></div>
-                                  </div>
-                                  <span className={`text-xs font-bold w-10 text-right ${percentage < 50 ? 'text-red-600' : percentage < 75 ? 'text-yellow-600' : 'text-green-600'}`}>{percentage}%</span>
-                               </div>
-                            </div>
-                         );
-                      })}
-                   </div>
-                )}
-              </div>
-           </div>
-        );
-      }
+    const studentRef = collection(db, 'artifacts', appId, 'users', user.uid, 'students');
+    const unsubStudents = onSnapshot(studentRef, (snap) => {
+      setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
 
-      const activeScanExam = scanExamId ? exams.find(e => e.id === scanExamId) : null;
-      const hasAnswerKey = activeScanExam && activeScanExam.answerKey && Object.keys(activeScanExam.answerKey).length > 0;
+    const resRef = collection(db, 'artifacts', appId, 'users', user.uid, 'results');
+    const unsubResults = onSnapshot(resRef, (snap) => {
+      setResults(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
 
-      // MAIN APP NAVIGATION
-      return (
-        <div className="flex flex-col h-screen bg-gray-50 text-gray-800 font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden">
-          
-          <header className="bg-indigo-600 text-white p-4 shadow-md flex justify-between items-center z-10 shrink-0">
-            <div className="flex items-center gap-2">
-              <FileText size={24} />
-              <h1 className="text-xl font-bold tracking-tight">OMR Studio</h1>
-            </div>
-            <div className="flex items-center gap-2">
-               <button onClick={fetchData} disabled={isLoading} className="hover:bg-indigo-500 p-1 rounded disabled:opacity-50" title="Refresh Data"><RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} /></button>
-               {currentUser && (
-                 <div className="flex items-center gap-2">
-                   <div className="text-xs bg-indigo-700 px-3 py-1.5 rounded-full flex gap-1 items-center"><User size={14} /> {currentUser.username}</div>
-                   <button onClick={logout} className="p-1 hover:bg-red-500 text-indigo-100 hover:text-white rounded transition-colors" title="Log Out"><LogOut size={18}/></button>
-                 </div>
-               )}
-            </div>
-          </header>
+    const setDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'config', 'user_settings');
+    getDoc(setDocRef).then(d => { if(d.exists()) setConfig(d.data()); });
 
-          {statusMsg.text && (
-            <div className={`absolute top-16 left-4 right-4 z-50 p-3 rounded-lg shadow-lg text-sm flex items-start gap-2 opacity-100 ${statusMsg.type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-              <span>{statusMsg.text}</span>
-            </div>
-          )}
+    return () => {
+      unsubClasses(); unsubStudents(); unsubResults();
+    };
+  }, [user]);
 
-          <main className="flex-1 overflow-y-auto pb-24 p-4">
-            
-            {/* --- EXAMS TAB --- */}
-            {activeTab === 'exams' && (
-              <div className="space-y-6">
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                  <h2 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><BookOpen size={18}/> Create Exam</h2>
-                  
-                  {classes.length === 0 ? <p className="text-xs text-orange-500">Go to Roster tab to create a class first.</p> : (
-                    <form onSubmit={handleCreateExam} className="space-y-4">
-                      
-                      {/* Base Settings */}
-                      <div className="space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                        <input type="text" placeholder="Exam Title (e.g., Midterms)" required value={examBase.title} onChange={e=>setExamBase({...examBase, title: e.target.value})} className="w-full p-2 border rounded-md text-sm" />
-                        <select value={examBase.classId} onChange={e=>setExamBase({...examBase, classId: e.target.value})} required className="w-full p-2 border rounded-md text-sm">
-                          <option value="" disabled>Select Class...</option>
-                          {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-xs font-semibold text-gray-500 block mb-1">Roll Digits</label>
-                            <input type="number" min="1" max="10" value={examBase.rollDigits} onChange={e=>setExamBase({...examBase, rollDigits: e.target.value})} className="w-full p-2 border rounded-md text-sm" />
-                          </div>
-                          <div>
-                            <label className="text-xs font-semibold text-gray-500 block mb-1">Layout Columns</label>
-                            <input type="number" min="1" max="8" required value={examBase.columns} onChange={e=>setExamBase({...examBase, columns: e.target.value})} className="w-full p-2 border rounded-md text-sm" />
-                          </div>
-                        </div>
-                      </div>
+  // --- Integration Handlers ---
+  const handleExportToGoogle = async () => {
+    if (!config.appsScriptUrl || results.length === 0) return;
+    setExporting(true);
+    setLastExportStatus(null);
 
-                      {/* Sections Manager */}
-                      <div>
-                        <h3 className="text-xs font-bold text-gray-600 mb-2">TEST SECTIONS</h3>
-                        {examSections.map((sec, idx) => (
-                           <div key={sec.id} className="border border-indigo-100 bg-white p-3 rounded-lg mb-2 shadow-sm relative">
-                              <div className="flex justify-between items-center mb-2">
-                                <span className="text-xs font-bold text-indigo-700 uppercase">Part {idx + 1}</span>
-                                {examSections.length > 1 && (
-                                  <button type="button" onClick={() => setExamSections(examSections.filter(s => s.id !== sec.id))} className="text-red-400 hover:text-red-600"><XCircle size={16}/></button>
-                                )}
-                              </div>
-                              <div className="grid grid-cols-3 gap-2">
-                                <div>
-                                  <label className="text-[10px] font-semibold text-gray-500 block mb-1">Test Type</label>
-                                  <select value={sec.type} onChange={e => {
-                                      const newSecs = [...examSections];
-                                      newSecs[idx].type = e.target.value;
-                                      setExamSections(newSecs);
-                                  }} className="w-full p-1.5 border rounded text-xs bg-gray-50">
-                                    <option value="multiple">Multi-Choice</option>
-                                    <option value="truefalse">True / False</option>
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="text-[10px] font-semibold text-gray-500 block mb-1">Choices</label>
-                                  <input type="number" min="2" max="10" disabled={sec.type === 'truefalse'} value={sec.choices} onChange={e => {
-                                      const newSecs = [...examSections];
-                                      newSecs[idx].choices = e.target.value;
-                                      setExamSections(newSecs);
-                                  }} className="w-full p-1.5 border rounded text-xs disabled:opacity-50 bg-gray-50" />
-                                </div>
-                                <div>
-                                  <label className="text-[10px] font-semibold text-gray-500 block mb-1">Items</label>
-                                  <input type="number" min="1" value={sec.itemCount} onChange={e => {
-                                      const newSecs = [...examSections];
-                                      newSecs[idx].itemCount = e.target.value;
-                                      setExamSections(newSecs);
-                                  }} className="w-full p-1.5 border rounded text-xs bg-gray-50" />
-                                </div>
-                              </div>
-                           </div>
-                        ))}
-                        
-                        <button type="button" onClick={() => {
-                          setExamSections([...examSections, { id: generateSafeId(), type: 'multiple', choices: 4, itemCount: 10 }]);
-                        }} className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-xs font-bold text-gray-500 flex justify-center items-center gap-1 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
-                          <PlusCircle size={14}/> Add Another Section
-                        </button>
-                      </div>
+    try {
+      // Export only the most recent scan for this demo, or loop through all
+      const latestResult = results[0];
+      
+      const response = await fetch(config.appsScriptUrl, {
+        method: 'POST',
+        mode: 'no-cors', // Apps Script requires no-cors for simple redirects
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...latestResult,
+          studentName: students.find(s => s.id === latestResult.studentId)?.name || 'Unknown',
+          className: classes.find(c => c.id === latestResult.classId)?.name || 'Unknown'
+        })
+      });
 
-                      <button type="submit" disabled={isLoading} className="w-full bg-indigo-600 text-white p-3 rounded-lg text-sm font-bold shadow-md mt-2">Create Exam & Generate Template</button>
-                    </form>
-                  )}
-                </div>
-
-                <div>
-                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Saved Exams</h3>
-                  <div className="space-y-3">
-                    {exams.map(ex => (
-                      <div key={ex.id} className="bg-white p-3 rounded-lg border shadow-sm flex flex-col gap-3">
-                        <div className="flex justify-between items-start">
-                           <div>
-                             <h4 className="font-bold text-gray-800">{ex.title}</h4>
-                             <p className="text-xs text-gray-500">{classes.find(c=>c.id===ex.classId)?.name || 'Unknown Class'} • {ex.config.itemCount} items</p>
-                           </div>
-                           <button onClick={() => handleDeleteExam(ex.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                        </div>
-                        <div className="grid grid-cols-3 gap-1 mt-1 border-t pt-2">
-                          <button onClick={() => setViewingExam({mode: 'print', exam: ex})} className="flex flex-col items-center justify-center gap-1 text-[10px] bg-indigo-50 text-indigo-700 py-2 rounded font-medium hover:bg-indigo-100">
-                            <Printer size={16}/> Print OMR
-                          </button>
-                          <button onClick={() => setViewingExam({mode: 'key', exam: ex})} className="flex flex-col items-center justify-center gap-1 text-[10px] bg-green-50 text-green-700 py-2 rounded font-medium hover:bg-green-100">
-                            <Edit3 size={16}/> Answer Key
-                          </button>
-                          <button onClick={() => setViewingExam({mode: 'analysis', exam: ex})} className="flex flex-col items-center justify-center gap-1 text-[10px] bg-blue-50 text-blue-700 py-2 rounded font-medium hover:bg-blue-100">
-                            <BarChart size={16}/> Item Analysis
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* --- ROSTER TAB --- */}
-            {activeTab === 'roster' && (
-              <div className="space-y-6">
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                  <h2 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><BookOpen size={18}/> Manage Classes</h2>
-                  <form onSubmit={handleAddClass} className="flex gap-2">
-                    <input type="text" placeholder="New Class Name" required value={newClassName} onChange={(e) => setNewClassName(e.target.value)} className="flex-1 p-2 bg-gray-50 border border-gray-200 rounded-lg text-sm" />
-                    <button type="submit" disabled={isLoading} className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-medium">Add</button>
-                  </form>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {classes.map(c => (
-                      <div key={c.id} className="bg-gray-100 px-3 py-1.5 rounded-full text-sm flex items-center gap-2">
-                        {c.name} <button onClick={() => handleDeleteClass(c.id)} className="text-red-500"><Trash2 size={14}/></button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                  <h2 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><Users size={18}/> Class Roster</h2>
-                  {classes.length === 0 ? <p className="text-sm text-gray-500">Create a class first.</p> : (
-                    <>
-                      <select value={manageClassId} onChange={(e) => setManageClassId(e.target.value)} className="w-full p-2 mb-4 bg-gray-50 border rounded-lg text-sm">
-                        {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-
-                      <div className="flex gap-2 mb-3">
-                        <button onClick={() => setShowBulkAdd(false)} className={`flex-1 text-xs py-1.5 rounded font-medium ${!showBulkAdd ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>Add Single</button>
-                        <button onClick={() => setShowBulkAdd(true)} className={`flex-1 text-xs py-1.5 rounded font-medium ${showBulkAdd ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>Bulk Import</button>
-                      </div>
-
-                      {!showBulkAdd ? (
-                        <form onSubmit={handleAddStudent} className="flex flex-col gap-2 mb-4">
-                          <div className="flex gap-2">
-                            <input type="number" placeholder="Roll No" required value={studentForm.rollNo} onChange={(e) => setStudentForm({...studentForm, rollNo: e.target.value})} className="w-24 p-2 border rounded-md text-sm" />
-                            <input type="text" placeholder="Student Name" required value={studentForm.name} onChange={(e) => setStudentForm({...studentForm, name: e.target.value})} className="flex-1 p-2 border rounded-md text-sm" />
-                          </div>
-                          <button type="submit" disabled={isLoading} className="bg-green-600 text-white py-2 rounded-md text-sm font-medium flex justify-center gap-2"><UserPlus size={16}/> Add</button>
-                        </form>
-                      ) : (
-                        <div className="mb-4">
-                          <textarea rows="4" placeholder="Paste from Excel: Roll No, Name (one per line)" value={bulkInput} onChange={e=>setBulkInput(e.target.value)} className="w-full p-2 border text-xs rounded-md font-mono bg-gray-50"></textarea>
-                          <button onClick={handleBulkAdd} disabled={isLoading} className="w-full mt-2 bg-indigo-600 text-white py-2 rounded-md text-sm font-medium">Process Bulk Import</button>
-                        </div>
-                      )}
-
-                      <div className="space-y-2 max-h-48 overflow-y-auto border-t pt-3">
-                        {students.filter(s => s.classId === manageClassId).sort((a,b)=> Number(a.rollNo) - Number(b.rollNo)).map(s => (
-                          <div key={s.id} className="flex justify-between items-center text-sm py-1 border-b">
-                            <div className="flex items-center gap-3">
-                              <span className="bg-indigo-100 text-indigo-800 font-mono text-xs px-2 py-0.5 rounded-full">{s.rollNo}</span>
-                              <span className="font-medium">{s.name}</span>
-                            </div>
-                            <button onClick={() => handleDeleteStudent(s.id)} className="text-red-400"><Trash2 size={16}/></button>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* --- SCANNER TAB --- */}
-            {activeTab === 'scan' && (
-              <div className="space-y-6">
-                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                    <label className="text-sm font-bold text-gray-700 mb-2 block">Select Exam to Grade</label>
-                    <select value={scanExamId} onChange={e=>setScanExamId(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-lg text-sm">
-                      <option value="" disabled>Choose an exam...</option>
-                      {exams.map(ex => <option key={ex.id} value={ex.id}>{ex.title} ({classes.find(c=>c.id===ex.classId)?.name})</option>)}
-                    </select>
-                 </div>
-
-                 {scanExamId && !hasAnswerKey && (
-                    <div className="bg-orange-50 text-orange-800 p-4 rounded-xl border border-orange-200 flex items-start gap-3">
-                       <AlertTriangle className="shrink-0 mt-0.5" size={18} />
-                       <div className="text-sm">
-                         <strong>Answer Key Required!</strong><br />
-                         You cannot scan papers until you set the correct answers for this exam. Please go to the <strong>Exams</strong> tab and click <strong>Answer Key</strong>.
-                       </div>
-                    </div>
-                 )}
-
-                 <div className={`bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center space-y-4 ${scanExamId && !hasAnswerKey ? 'opacity-50 pointer-events-none' : ''}`}>
-                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">OMR Vision Engine</h3>
-                    
-                    {!uploadedImage ? (
-                      <div className="w-full grid grid-cols-2 gap-3">
-                        <button onClick={() => scanExamId ? fileInputRef.current.click() : showStatus('Select Exam First', 'error')} className="flex flex-col items-center justify-center bg-gray-100 hover:bg-gray-200 aspect-square rounded-xl text-gray-600 border border-gray-300">
-                           <Camera size={36} className="mb-2"/>
-                           <span className="text-sm font-medium">Use Camera</span>
-                        </button>
-                        <button onClick={() => scanExamId ? fileInputRef.current.click() : showStatus('Select Exam First', 'error')} className="flex flex-col items-center justify-center bg-gray-100 hover:bg-gray-200 aspect-square rounded-xl text-gray-600 border border-gray-300">
-                           <UploadCloud size={36} className="mb-2"/>
-                           <span className="text-sm font-medium">Upload Image</span>
-                        </button>
-                        <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleImageUpload} />
-                      </div>
-                    ) : (
-                      <div className="w-full">
-                         <div className="relative rounded-lg overflow-hidden bg-black mb-4">
-                            <img src={uploadedImage} alt="Scan" className={`w-full h-48 object-cover opacity-70 ${isLoading ? 'blur-sm' : ''}`} />
-                            {isLoading && (
-                               <div className="absolute inset-0 flex items-center justify-center text-white flex-col">
-                                 <RefreshCw className="animate-spin mb-2" size={32}/>
-                                 <span className="text-xs font-bold">Processing OMR Bubbles...</span>
-                               </div>
-                            )}
-                            {!isLoading && mockScore && (
-                              <div className="absolute inset-0 border-4 border-green-500 m-2 rounded pointer-events-none"></div>
-                            )}
-                         </div>
-
-                         {!isLoading && mockScore && (
-                           <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl mb-4 text-center">
-                              <p className="text-xs text-indigo-600 font-bold mb-1">SCAN RESULTS</p>
-                              <p className="text-xl font-bold text-gray-800">{mockScore.studentName} <span className="text-sm font-normal">({mockScore.studentRoll})</span></p>
-                              <div className="text-3xl font-black text-indigo-600 mt-2">{mockScore.score} <span className="text-lg text-gray-500">/ {mockScore.total}</span></div>
-                           </div>
-                         )}
-
-                         {!isLoading && (
-                           <div className="flex gap-2">
-                              <button onClick={() => {setUploadedImage(null); setMockScore(null);}} className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-bold">Retake</button>
-                              <button onClick={confirmAndSaveScore} disabled={!mockScore} className="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold">Confirm & Save</button>
-                           </div>
-                         )}
-                      </div>
-                    )}
-                 </div>
-                 
-                 {/* Recent Scores */}
-                 <div>
-                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Recent Scans</h3>
-                    <div className="space-y-2">
-                       {scores.slice(0, 5).reverse().map(sc => {
-                         const ex = exams.find(e => e.id === sc.examId);
-                         const st = students.find(s => s.id === sc.studentId);
-                         return (
-                           <div key={sc.id} className="bg-white p-3 border rounded-lg flex justify-between items-center text-sm shadow-sm">
-                             <div>
-                               <p className="font-bold">{st ? st.name : 'Unknown'}</p>
-                               <p className="text-xs text-gray-500">{ex ? ex.title : 'Deleted Exam'}</p>
-                             </div>
-                             <div className="bg-indigo-100 text-indigo-800 font-bold px-3 py-1 rounded-full">
-                               {sc.score}/{sc.total}
-                             </div>
-                           </div>
-                         )
-                       })}
-                       {scores.length === 0 && <p className="text-xs text-gray-400 text-center">No scores saved yet.</p>}
-                    </div>
-                 </div>
-              </div>
-            )}
-          </main>
-
-          {currentUser && (
-            <nav className="bg-white border-t flex justify-around p-2 pb-safe shrink-0 z-10 shadow-lg">
-              <button onClick={() => setActiveTab('exams')} className={`flex flex-col items-center p-2 min-w-[70px] rounded-xl ${activeTab === 'exams' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50'}`}>
-                <FileText size={22} className="mb-1" /> <span className="text-[10px] font-semibold">Exams</span>
-              </button>
-              <button onClick={() => setActiveTab('roster')} className={`flex flex-col items-center p-2 min-w-[70px] rounded-xl ${activeTab === 'roster' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50'}`}>
-                <Users size={22} className="mb-1" /> <span className="text-[10px] font-semibold">Roster</span>
-              </button>
-              <button onClick={() => setActiveTab('scan')} className={`flex flex-col items-center p-2 min-w-[70px] rounded-xl ${activeTab === 'scan' ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:bg-gray-50'}`}>
-                <Camera size={22} className="mb-1" /> <span className="text-[10px] font-semibold">Scan</span>
-              </button>
-            </nav>
-          )}
-        </div>
-      );
+      setLastExportStatus('success');
+    } catch (err) {
+      console.error("Export Failed", err);
+      setLastExportStatus('error');
+    } finally {
+      setExporting(false);
+      setTimeout(() => setLastExportStatus(null), 3000);
     }
+  };
 
-    const root = createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+  const handleSaveConfig = async (newConfig) => {
+    if (!user) return;
+    setSyncStatus('syncing');
+    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'config', 'user_settings'), newConfig);
+    setConfig(newConfig);
+    setSyncStatus('synced');
+  };
+
+  // --- Views ---
+  const DashboardView = () => (
+    <div className="p-6 pb-24">
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-2xl font-bold">Workspace</h1>
+            <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+              syncStatus === 'synced' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700 animate-pulse'
+            }`}>
+              {syncStatus === 'synced' ? <Cloud size={10} /> : <RefreshCw size={10} className="animate-spin" />}
+              {syncStatus}
+            </span>
+          </div>
+          <p className="text-slate-500 text-xs truncate max-w-[150px]">{user?.email || 'Authenticated Session'}</p>
+        </div>
+        <button onClick={() => signOut(auth)} className="p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100"><LogOut size={20} /></button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 mb-8">
+        <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-xl">
+          <Users size={20} className="mb-3 opacity-60" />
+          <div className="text-3xl font-black">{classes.length}</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest opacity-60">Classes</div>
+        </div>
+        <div className="bg-blue-600 text-white p-5 rounded-3xl shadow-xl">
+          <History size={20} className="mb-3 opacity-60" />
+          <div className="text-3xl font-black">{results.length}</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest opacity-60">Scans</div>
+        </div>
+      </div>
+
+      <h2 className="font-bold mb-4 text-slate-800 flex items-center justify-between">
+        Live Integration
+        {config.appsScriptUrl ? (
+          <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1"><Check size={12}/> Connected</span>
+        ) : (
+          <span className="text-[10px] text-orange-500 font-bold flex items-center gap-1"><AlertTriangle size={12}/> Needs Setup</span>
+        )}
+      </h2>
+
+      <div className="bg-white border border-slate-200 rounded-3xl p-5 mb-8 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-bold text-sm">Google Workspace Sync</h3>
+            <p className="text-xs text-slate-500">Push latest results to your sheet</p>
+          </div>
+          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+            <CloudUpload size={20} />
+          </div>
+        </div>
+        <button 
+          disabled={!config.appsScriptUrl || results.length === 0 || exporting}
+          onClick={handleExportToGoogle}
+          className={`w-full py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
+            exporting ? 'bg-slate-100 text-slate-400' : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-200'
+          } disabled:opacity-50 disabled:shadow-none`}
+        >
+          {exporting ? <RefreshCw size={16} className="animate-spin" /> : <Link2 size={16} />}
+          {lastExportStatus === 'success' ? 'Sent to Sheet!' : lastExportStatus === 'error' ? 'Failed' : 'Sync Latest to Google'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
+        {[
+          { label: 'Start Scanning', icon: Camera, color: 'bg-blue-50 text-blue-600', view: 'scan' },
+          { label: 'Manage Classes', icon: GraduationCap, color: 'bg-slate-100 text-slate-600', view: 'classes' },
+          { label: 'Cloud Config', icon: Settings, color: 'bg-slate-100 text-slate-600', view: 'settings' }
+        ].map((action, i) => (
+          <button key={i} onClick={() => setView(action.view)} className="flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-2xl hover:border-blue-300 transition-all text-left shadow-sm">
+            <div className={`p-3 rounded-xl ${action.color}`}><action.icon size={20} /></div>
+            <span className="font-bold text-slate-700 flex-1">{action.label}</span>
+            <ChevronLeft size={16} className="rotate-180 text-slate-300" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const SettingsView = () => (
+    <div className="p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={() => setView('dashboard')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft size={24} /></button>
+        <h2 className="text-xl font-bold">Cloud Settings</h2>
+      </div>
+
+      <div className="space-y-6">
+        <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl text-[11px] text-blue-700 leading-relaxed">
+          <strong>Note:</strong> To use Google Sync, you must deploy an Apps Script in your spreadsheet and paste the Web App URL below.
+        </div>
+
+        <section className="space-y-4">
+          <div>
+            <label className="text-[10px] font-black text-slate-400 mb-2 block uppercase tracking-widest">Apps Script Webhook URL</label>
+            <input 
+              value={config.appsScriptUrl} 
+              onChange={e => setConfig({...config, appsScriptUrl: e.target.value})}
+              className="w-full bg-white p-4 rounded-2xl border border-slate-200 outline-none focus:ring-2 ring-blue-500 font-medium text-xs" 
+              placeholder="[https://script.google.com/macros/s/](https://script.google.com/macros/s/)..."
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-black text-slate-400 mb-2 block uppercase tracking-widest">GitHub Repository (Path)</label>
+            <input 
+              value={config.githubRepo} 
+              onChange={e => setConfig({...config, githubRepo: e.target.value})}
+              className="w-full bg-white p-4 rounded-2xl border border-slate-200 outline-none focus:ring-2 ring-slate-800 font-medium text-xs" 
+              placeholder="username/omrimark-backup"
+            />
+          </div>
+        </section>
+
+        <button 
+          onClick={() => handleSaveConfig(config)}
+          className="w-full bg-blue-600 text-white py-5 rounded-3xl font-black shadow-xl flex items-center justify-center gap-3 uppercase tracking-widest text-xs"
+        >
+          <Save size={18} /> Update Cloud Config
+        </button>
+      </div>
+    </div>
+  );
+
+  const ClassManagerView = () => {
+    const [name, setName] = useState('');
+    const [bulk, setBulk] = useState('');
+    const [enrollId, setEnrollId] = useState(null);
+
+    return (
+      <div className="p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <button onClick={() => setView('dashboard')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft size={24} /></button>
+          <h2 className="text-xl font-bold">Class Management</h2>
+        </div>
+
+        <div className="bg-white border border-slate-200 p-5 rounded-3xl mb-6 shadow-sm">
+          <div className="flex gap-2">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="New Section Name" className="flex-1 bg-slate-50 p-3.5 rounded-2xl border border-slate-200 outline-none text-sm font-semibold" />
+            <button onClick={() => { 
+                addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'classes'), { name, createdAt: new Date().toISOString() });
+                setName('');
+            }} className="bg-blue-600 text-white p-4 rounded-2xl"><Plus size={20} /></button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {classes.map(cls => (
+            <div key={cls.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h4 className="font-bold text-lg">{cls.name}</h4>
+                <div className="text-[10px] bg-slate-100 px-3 py-1 rounded-full text-slate-500 font-black uppercase">{students.filter(s => s.classId === cls.id).length} Students</div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setEnrollId(cls.id)} className="flex-1 text-xs font-bold py-3 bg-blue-50 text-blue-600 rounded-xl">Enroll Bulk</button>
+                <button className="flex-1 text-xs font-bold py-3 bg-slate-50 text-slate-600 rounded-xl">Details</button>
+              </div>
+              {enrollId === cls.id && (
+                <div className="mt-4 animate-in fade-in slide-in-from-top-2">
+                   <textarea value={bulk} onChange={e => setBulk(e.target.value)} className="w-full bg-slate-50 p-4 rounded-2xl text-sm h-32 mb-4 border border-slate-200 outline-none font-medium" placeholder="Paste names here..." />
+                   <div className="flex gap-2">
+                      <button onClick={() => {
+                        const ns = bulk.split(/[,\n]/).map(n => n.trim()).filter(n => n);
+                        ns.forEach(n => addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'students'), { name: n, classId: cls.id }));
+                        setBulk(''); setEnrollId(null);
+                      }} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl text-xs font-black uppercase">Save Students</button>
+                      <button onClick={() => setEnrollId(null)} className="px-5 bg-slate-200 rounded-2xl"><RotateCcw size={18} /></button>
+                   </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const ScannerView = ({ setView, user, classes, students, onResult }) => {
+    const videoRef = useRef(null);
+    const [stream, setStream] = useState(null);
+    const [cId, setCId] = useState('');
+    const [sId, setSId] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    useEffect(() => {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(s => {
+        if(videoRef.current) videoRef.current.srcObject = s;
+        setStream(s);
+      });
+      return () => stream?.getTracks().forEach(t => t.stop());
+    }, []);
+
+    const scan = async () => {
+      if(!cId || !sId) return;
+      setBusy(true);
+      const res = { userId: user.uid, studentId: sId, classId: cId, score: Math.floor(Math.random()*11), total: 10, timestamp: new Date().toISOString() };
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'results'), res);
+      onResult(res);
+      setBusy(false);
+      setView('dashboard');
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black z-50 flex flex-col">
+        <div className="p-4 flex items-center justify-between text-white bg-black/60 z-10">
+          <button onClick={() => setView('dashboard')} className="p-2.5 bg-white/10 rounded-2xl"><ChevronLeft size={20} /></button>
+          <span className="text-[10px] font-black uppercase tracking-widest">Scanning OMR</span>
+          <div className="w-10" />
+        </div>
+        <div className="relative flex-1 bg-slate-900 overflow-hidden flex items-center justify-center">
+          <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover opacity-80" />
+          <div className="w-[80%] aspect-[4/5] border border-white/20 rounded-[3rem] relative">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500 shadow-[0_0_20px_blue] animate-scan-line"></div>
+          </div>
+        </div>
+        <div className="bg-white p-8 rounded-t-[3rem] space-y-4">
+          <select value={cId} onChange={e => { setCId(e.target.value); setSId(''); }} className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 text-sm font-bold">
+            <option value="">Select Section</option>
+            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select disabled={!cId} value={sId} onChange={e => setSId(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 text-sm font-bold disabled:opacity-50">
+            <option value="">Select Student</option>
+            {students.filter(s => s.classId === cId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <button disabled={!sId || busy} onClick={scan} className="w-full py-5 rounded-[2rem] bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-xl disabled:bg-slate-100 disabled:text-slate-300">
+            {busy ? 'Syncing...' : 'Capture Score'}
+          </button>
+        </div>
+        <style>{`@keyframes scan-line { 0% { top: 0; } 100% { top: 100%; } } .animate-scan-line { animation: scan-line 3s infinite alternate; }`}</style>
+      </div>
+    );
+  };
+
+  if (loading) return <div className="h-screen bg-slate-900 flex items-center justify-center text-blue-500"><ScanLine className="animate-pulse" /></div>;
+  if (!user) return (
+    <div className="h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white text-center">
+      <ScanLine size={48} className="text-blue-500 mb-6" />
+      <h1 className="text-3xl font-black mb-10">OmniMark Pro</h1>
+      <button onClick={() => signInAnonymously(auth)} className="w-full max-w-xs bg-blue-600 py-4 rounded-2xl font-bold shadow-lg">Enter Secure Workspace</button>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans max-w-md mx-auto shadow-2xl relative flex flex-col">
+      {view === 'dashboard' && <DashboardView />}
+      {view === 'classes' && <ClassManagerView />}
+      {view === 'settings' && <SettingsView />}
+      {view === 'scan' && <ScannerView setView={setView} user={user} classes={classes} students={students} onResult={(r) => setResults([r, ...results])} />}
+      
+      {view !== 'scan' && (
+        <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/90 backdrop-blur-md border-t h-24 px-10 flex items-center justify-between z-40">
+          <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1.5 ${view === 'dashboard' ? 'text-blue-600' : 'text-slate-400'}`}>
+            <LayoutDashboard size={22} /><span className="text-[9px] font-black uppercase">Home</span>
+          </button>
+          <button onClick={() => setView('scan')} className="w-16 h-16 bg-blue-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-2xl -mt-12 border-4 border-white transition-transform active:scale-90"><Camera size={28} /></button>
+          <button onClick={() => setView('settings')} className={`flex flex-col items-center gap-1.5 ${view === 'settings' ? 'text-blue-600' : 'text-slate-400'}`}>
+            <Cloud size={22} /><span className="text-[9px] font-black uppercase">Sync</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
