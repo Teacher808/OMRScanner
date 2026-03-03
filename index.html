@@ -35,26 +35,28 @@
     if (typeof __firebase_config !== 'undefined') {
       firebaseConfig = JSON.parse(__firebase_config);
     } else {
-      // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyDQ1oFts4jTQ50MZ3UfjEPjJFX3o3l3mlc",
-  authDomain: "easyomr-99a32.firebaseapp.com",
-  projectId: "easyomr-99a32",
-  storageBucket: "easyomr-99a32.firebasestorage.app",
-  messagingSenderId: "545734045836",
-  appId: "1:545734045836:web:d963157f9a2e3576c94ba9",
-  measurementId: "G-HGY1039P8L"
-};
+      // REPLACE THIS WITH YOUR OWN FIREBASE CONFIG IF HOSTING EXTERNALLY
+      firebaseConfig = {
+        apiKey: "AIzaSyDQ1oFts4jTQ50MZ3UfjEPjJFX3o3l3mlc",
+        authDomain: "easyomr-99a32.firebaseapp.com",
+        projectId: "easyomr-99a32",
+        storageBucket: "easyomr-99a32.firebasestorage.app",
+        messagingSenderId: "545734045836",
+        appId: "1:545734045836:web:d963157f9a2e3576c94ba9",
+        measurementId: "G-HGY1039P8L"
+      };
     }
     
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'easyomr-app';
     let app, auth, db;
+    let firebaseInitError = null;
     try {
       app = initializeApp(firebaseConfig);
       auth = getAuth(app);
       db = getFirestore(app);
     } catch (e) {
       console.error("Firebase init failed:", e);
+      firebaseInitError = e.message;
     }
 
     // --- ICON COMPONENT MAPPER ---
@@ -162,6 +164,7 @@ const firebaseConfig = {
     function App() {
       const [user, setUser] = useState(null);
       const [isAuthChecking, setIsAuthChecking] = useState(true);
+      const [initError, setInitError] = useState('');
       const [view, setView] = useState('dashboard');
       
       // Data State
@@ -175,7 +178,11 @@ const firebaseConfig = {
 
       // Auth Listener
       useEffect(() => {
-        if (!auth) return;
+        if (!auth) {
+          setInitError(firebaseInitError || "Could not connect to Firebase database.");
+          setIsAuthChecking(false);
+          return;
+        }
         const initAuth = async () => {
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
             await signInWithCustomToken(auth, __initial_auth_token).catch(console.error);
@@ -240,7 +247,33 @@ const firebaseConfig = {
       };
 
       if (isAuthChecking) {
-        return <div className="min-h-screen flex items-center justify-center bg-gray-100">Loading...</div>;
+        return (
+          <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100">
+            <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p className="text-gray-500 font-bold">Connecting to Cloud Database...</p>
+          </div>
+        );
+      }
+
+      if (initError) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+            <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border border-red-100">
+              <Icon name="XCircle" size={48} className="text-red-500 mb-4 mx-auto" />
+              <h2 className="text-xl font-black text-gray-800 mb-2">Connection Error</h2>
+              <p className="text-sm text-gray-600 mb-6 bg-red-50 p-3 rounded-lg border border-red-100">{initError}</p>
+              
+              <div className="text-left bg-gray-50 p-4 rounded-xl text-sm text-gray-700">
+                <p className="font-bold mb-2">How to fix this:</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>Don't double-click the file:</strong> Browsers block database connections on <code>file:///</code> paths. Run this through a local web server (like the "Live Server" extension in VS Code).</li>
+                  <li>Check your internet connection.</li>
+                  <li>Ensure you are not in strict Incognito/Private mode.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        );
       }
 
       if (!user) {
