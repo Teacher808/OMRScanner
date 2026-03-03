@@ -66,7 +66,8 @@
         LogOut: 'fa-sign-out-alt', CheckCircle: 'fa-check-circle', XCircle: 'fa-times-circle', 
         List: 'fa-list', FileText: 'fa-file-alt', Users: 'fa-users', Printer: 'fa-print', 
         UserPlus: 'fa-user-plus', Upload: 'fa-upload', ChevronLeft: 'fa-chevron-left', 
-        BarChart2: 'fa-chart-bar', CloudUpload: 'fa-cloud-upload-alt', Trash: 'fa-trash'
+        BarChart2: 'fa-chart-bar', CloudUpload: 'fa-cloud-upload-alt', Trash: 'fa-trash',
+        Edit: 'fa-edit'
       };
       return <i className={`fas ${map[name]} ${className}`} style={{ fontSize: size }}></i>;
     }
@@ -154,6 +155,10 @@
               <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-blue-600 hover:underline font-medium">
                 {isLogin ? "Need an account? Register here" : "Already have an account? Sign in"}
               </button>
+            </div>
+
+            <div className="mt-8 text-center text-xs text-gray-400 font-medium">
+              Developed by PVNJ
             </div>
           </div>
         </div>
@@ -312,6 +317,7 @@
                 setView={setView} 
                 classes={classes}
                 showToast={showToast}
+                examToEdit={currentExam}
               />
             )}
             {view === 'analysis' && currentExam && (
@@ -356,6 +362,10 @@
                 setView={setView} 
               />
             )}
+
+            <div className="mt-12 text-center text-xs text-gray-400 font-medium print:hidden">
+              Developed by PVNJ
+            </div>
           </main>
 
           <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-3 pb-safe z-10 print:hidden shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
@@ -367,7 +377,7 @@
               <Icon name="Users" size={24} />
               <span className="text-xs mt-1 font-semibold">Classes</span>
             </button>
-            <button onClick={() => setView('create_exam')} className={`flex flex-col items-center p-2 ${view === 'create_exam' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600 transition'}`}>
+            <button onClick={() => { setCurrentExam(null); setView('create_exam'); }} className={`flex flex-col items-center p-2 ${view === 'create_exam' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600 transition'}`}>
               <Icon name="Plus" size={24} />
               <span className="text-xs mt-1 font-semibold">New Exam</span>
             </button>
@@ -385,7 +395,7 @@
             <h2 className="text-xl font-bold text-gray-800 mb-2">No Exams Yet</h2>
             <p className="text-gray-500 mb-6 text-sm">Create your first exam and print out bubble sheets for your students.</p>
             <button 
-              onClick={() => setView('create_exam')}
+              onClick={() => { setCurrentExam(null); setView('create_exam'); }}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-blue-700 transition flex items-center gap-2 mx-auto font-bold"
             >
               <Icon name="Plus" size={20} /> Create Exam
@@ -425,6 +435,13 @@
                 <div className="flex gap-2 w-full md:w-auto mt-2 md:mt-0 pt-3 md:pt-0 border-t border-gray-100 md:border-0 justify-between md:justify-end">
                   <div className="flex gap-2">
                     <button 
+                      onClick={() => { setCurrentExam(exam); setView('create_exam'); }}
+                      className="bg-blue-50 text-blue-600 p-3 rounded-xl hover:bg-blue-100 transition flex items-center gap-2 font-semibold text-sm"
+                      title="Edit Exam"
+                    >
+                      <Icon name="Edit" size={18} /> <span className="md:hidden">Edit</span>
+                    </button>
+                    <button 
                       onClick={() => { setCurrentExam(exam); setView('analysis'); }}
                       className="bg-purple-50 text-purple-600 p-3 rounded-xl hover:bg-purple-100 transition flex items-center gap-2 font-semibold text-sm"
                       title="Item Analysis"
@@ -454,7 +471,7 @@
     }
 
     // --- CREATE EXAM COMPONENT ---
-    function CreateExam({ saveExam, setView, classes, showToast }) {
+    function CreateExam({ saveExam, setView, classes, showToast, examToEdit }) {
       const [name, setName] = useState('');
       const [selectedClassId, setSelectedClassId] = useState('');
       const [questions, setQuestions] = useState(50);
@@ -468,6 +485,26 @@
       const [bEnd, setBEnd] = useState(50);
       const [bType, setBType] = useState('multiple_choice');
       const [bOptions, setBOptions] = useState(4);
+
+      useEffect(() => {
+        if (examToEdit) {
+          setName(examToEdit.name || '');
+          setSelectedClassId(examToEdit.classId || '');
+          setQuestions(examToEdit.questions || 50);
+          setRollNoLength(examToEdit.rollNoLength || 4);
+          if (examToEdit.answerKey) {
+            setAnswerKey(examToEdit.answerKey);
+          }
+          setBEnd(examToEdit.questions || 50);
+        } else {
+          setName('');
+          setSelectedClassId('');
+          setQuestions(50);
+          setRollNoLength(4);
+          setAnswerKey(Array.from({length: 50}, () => ({ type: 'multiple_choice', options: 4, answer: 0 })));
+          setBEnd(50);
+        }
+      }, [examToEdit]);
 
       const handleQuestionsChange = (e) => {
         let val = parseInt(e.target.value) || 1;
@@ -516,25 +553,50 @@
       const handleSave = () => {
         if (!name.trim()) return showToast("Please enter an exam name");
         const selectedClass = classes?.find(c => c.id === selectedClassId);
+        
+        let updatedResults = examToEdit && examToEdit.results ? [...examToEdit.results] : [];
+        
+        // Recalculate scores if editing an existing exam with results
+        if (examToEdit && updatedResults.length > 0) {
+          updatedResults = updatedResults.map(res => {
+            let newScore = 0;
+            for (let i = 0; i < questions; i++) {
+              if (res.scannedAnswers && res.scannedAnswers[i] !== undefined && res.scannedAnswers[i] === answerKey[i].answer) {
+                newScore++;
+              }
+            }
+            return { ...res, score: newScore, total: questions };
+          });
+        }
+
         const newExam = { 
-          id: Date.now().toString(),
+          id: examToEdit ? examToEdit.id : Date.now().toString(),
           name, 
           classId: selectedClassId,
           className: selectedClass ? selectedClass.name : '',
           questions, 
           rollNoLength,
           answerKey, 
-          createdAt: new Date().toISOString(),
-          results: []
+          createdAt: examToEdit ? examToEdit.createdAt : new Date().toISOString(),
+          results: updatedResults
         };
         saveExam(newExam); // Async cloud save
-        showToast("Exam created successfully!");
+        showToast(examToEdit ? "Exam updated successfully!" : "Exam created successfully!");
         setView('dashboard');
       };
 
       return (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-8">
-          <h2 className="text-2xl font-black text-gray-800 mb-6 border-b pb-4">Create New Exam</h2>
+          <div className="flex justify-between items-center mb-6 border-b pb-4">
+            <h2 className="text-2xl font-black text-gray-800">
+              {examToEdit ? "Edit Exam" : "Create New Exam"}
+            </h2>
+            {examToEdit && examToEdit.results?.length > 0 && (
+              <span className="text-xs bg-yellow-100 text-yellow-800 font-bold px-3 py-1 rounded-lg">
+                Warning: Editing will recalculate past scores.
+              </span>
+            )}
+          </div>
           <div className="space-y-6">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">Exam Name</label>
@@ -638,7 +700,7 @@
               onClick={handleSave}
               className="w-full bg-blue-600 text-white p-4 rounded-xl mt-8 font-black flex justify-center items-center gap-2 hover:bg-blue-700 shadow-lg text-lg"
             >
-              <Icon name="Save" size={24} /> Create Exam & Save to Cloud
+              <Icon name="Save" size={24} /> {examToEdit ? "Update Exam & Recalculate" : "Create Exam & Save to Cloud"}
             </button>
           </div>
         </div>
