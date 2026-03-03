@@ -21,6 +21,15 @@
   <!-- HTML2Canvas & jsPDF for exporting OMR Sheets -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <style>
+    @media print {
+      @page { size: letter portrait; margin: 0; }
+      body { margin: 0; padding: 0; background: #fff; }
+      .print-hidden { display: none !important; }
+      .print-area { width: 100% !important; max-width: 100% !important; border: none !important; margin: 0 !important; box-shadow: none !important; }
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
@@ -290,10 +299,10 @@
       }
 
       return (
-        <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20">
+        <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 print:bg-white print:pb-0 print:min-h-0">
           <Toast message={toastMsg} onClose={() => setToastMsg('')} />
           
-          <header className="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center print:hidden">
+          <header className="print-hidden bg-blue-600 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center">
             <h1 className="text-xl font-bold flex items-center gap-2">
               <Icon name="Camera" size={24} /> EasyOMR
             </h1>
@@ -307,7 +316,7 @@
             </div>
           </header>
 
-          <main className="p-4 max-w-2xl mx-auto">
+          <main className="p-4 max-w-2xl mx-auto print:max-w-none print:p-0 print:m-0">
             {view === 'dashboard' && (
               <Dashboard 
                 exams={exams} 
@@ -370,12 +379,12 @@
               />
             )}
 
-            <div className="mt-12 text-center text-xs text-gray-400 font-bold uppercase tracking-wider print:hidden">
+            <div className="print-hidden mt-12 text-center text-xs text-gray-400 font-bold uppercase tracking-wider">
               Developed by PVNJ
             </div>
           </main>
 
-          <nav className="fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-3 pb-safe z-10 print:hidden shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+          <nav className="print-hidden fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-3 pb-safe z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
             <button onClick={() => setView('dashboard')} className={`flex flex-col items-center p-2 ${view === 'dashboard' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600 transition'}`}>
               <Icon name="List" size={24} />
               <span className="text-xs mt-1 font-semibold">Exams</span>
@@ -741,7 +750,7 @@
       const [scannedStudentName, setScannedStudentName] = useState('');
       const [isProcessing, setIsProcessing] = useState(false);
 
-      const numCols = exam.questions <= 50 ? 2 : exam.questions <= 100 ? 3 : exam.questions <= 150 ? 4 : 5;
+      const numCols = exam.questions <= 40 ? 2 : exam.questions <= 90 ? 3 : exam.questions <= 140 ? 4 : 5;
       const rowsPerCol = Math.ceil(exam.questions / numCols);
       const rnLength = exam.rollNoLength || 4;
 
@@ -788,7 +797,7 @@
         const W = canvas.width;
         const H = canvas.height;
 
-        // --- ZONE MATHEMATICS (Matches UI overlay percentages) ---
+        // --- ZONE MATHEMATICS (Matches UI absolute positioning strictly) ---
         // 1. Roll Number Zone (Left: 55%, Top: 15%, Width: 35%, Height: 20%)
         const rnStartX = W * 0.55;
         const rnStartY = H * 0.15;
@@ -797,6 +806,7 @@
         
         const rnColW = rnTotalW / rnLength;
         const rnRowH = rnTotalH / 10;
+        const rnBoxSize = Math.min(rnColW * 0.6, rnRowH * 0.6);
 
         let scannedRollNo = '';
 
@@ -804,10 +814,13 @@
           let maxD = 0;
           let bestVal = -1;
           for (let r = 0; r < 10; r++) {
-            const sx = rnStartX + (c * rnColW) + (rnColW * 0.3);
-            const sy = rnStartY + (r * rnRowH) + (rnRowH * 0.2); // slight offset for bubble
-            const sw = rnColW * 0.4;
-            const sh = rnRowH * 0.6;
+            const cellCenterX = rnStartX + (c * rnColW) + (rnColW / 2);
+            const cellCenterY = rnStartY + (r * rnRowH) + (rnRowH / 2);
+            
+            const sx = cellCenterX - (rnBoxSize / 2);
+            const sy = cellCenterY - (rnBoxSize / 2);
+            const sw = rnBoxSize;
+            const sh = rnBoxSize;
             
             const imgD = ctx.getImageData(sx, sy, sw, sh);
             const d = calculateDarkness(imgD.data);
@@ -831,6 +844,7 @@
         const maxOptions = Math.max(...exam.answerKey.map(q => q.options));
         const optAreaW = ansColW * 0.7; // Leave 30% width for question numbers
         const cellW = optAreaW / maxOptions;
+        const boxSize = Math.min(cellW * 0.6, ansRowH * 0.6);
 
         let scannedAnswers = [];
         let score = 0;
@@ -847,10 +861,13 @@
           let bestOpt = -1;
 
           for (let o = 0; o < qData.options; o++) {
-            const sx = qStartX + (o * cellW) + (cellW * 0.2);
-            const sy = qStartY + (ansRowH * 0.2);
-            const sw = cellW * 0.6;
-            const sh = ansRowH * 0.6;
+            const cellCenterX = qStartX + (o * cellW) + (cellW / 2);
+            const cellCenterY = qStartY + (ansRowH / 2);
+
+            const sx = cellCenterX - (boxSize / 2);
+            const sy = cellCenterY - (boxSize / 2);
+            const sw = boxSize;
+            const sh = boxSize;
 
             const imgD = ctx.getImageData(sx, sy, sw, sh);
             const d = calculateDarkness(imgD.data);
@@ -935,9 +952,9 @@
                     <div className="absolute border-2 border-blue-400 bg-blue-400/10 rounded flex flex-col items-center shadow-[0_0_15px_rgba(59,130,246,0.5)]"
                          style={{ left: '55%', top: '15%', width: '35%', height: '20%' }}>
                        <span className="bg-blue-600 text-white text-[9px] px-1 font-bold rounded-b absolute top-0">ROLL NO</span>
-                       <div className="flex w-full h-full pt-[18px] pb-1 px-1 gap-0.5">
+                       <div className="flex w-full h-full justify-between px-[10%]">
                           {Array.from({length: rnLength}).map((_, i) => (
-                             <div key={i} className="flex-1 border border-blue-400/50 rounded-sm"></div>
+                             <div key={i} className="h-full border-l border-r border-blue-400/50 w-[10%]"></div>
                           ))}
                        </div>
                     </div>
@@ -1358,12 +1375,15 @@
 
     // --- OMR SHEET PRINT TEMPLATE COMPONENT ---
     function OMRSheetTemplate({ exam, setView, showToast }) {
-      const numCols = exam.questions <= 50 ? 2 : exam.questions <= 100 ? 3 : exam.questions <= 150 ? 4 : 5;
-      const rowsPerCol = Math.ceil(exam.questions / numCols);
-      
       const printAreaRef = useRef(null);
       const [isExporting, setIsExporting] = useState(false);
       const [customHeader, setCustomHeader] = useState("OFFICIAL OMR ANSWER SHEET");
+      const [customInstructions, setCustomInstructions] = useState("INSTRUCTIONS: Completely fill in the circle corresponding to your answer. Do not use checkmarks or Xs.");
+
+      // Dynamic Resizing Logic based on Number of Questions to fit 1 page
+      const numCols = exam.questions <= 40 ? 2 : exam.questions <= 90 ? 3 : exam.questions <= 140 ? 4 : 5;
+      const rowsPerCol = Math.ceil(exam.questions / numCols);
+      const maxOptions = Math.max(...exam.answerKey.map(q => q.options), 1);
 
       const handlePrint = () => {
         window.print();
@@ -1395,12 +1415,8 @@
           const imgData = canvas.toDataURL('image/jpeg', 1.0);
           
           const { jsPDF } = window.jspdf;
-          const pdf = new jsPDF('p', 'mm', 'a4');
-          
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-          
-          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+          const pdf = new jsPDF('p', 'in', 'letter');
+          pdf.addImage(imgData, 'JPEG', 0, 0, 8.5, 11);
           pdf.save(`${exam.name.replace(/\s+/g, '_')}_OMR.pdf`);
           showToast("PDF exported successfully!");
         } catch (error) {
@@ -1412,7 +1428,7 @@
 
       return (
         <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 mb-8 print:p-0 print:shadow-none print:border-none print:m-0">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print:hidden">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print-hidden">
             <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-blue-600 transition bg-white p-2 rounded-full shadow-sm border border-gray-100 flex items-center gap-2 px-4 font-bold">
               <Icon name="ChevronLeft" size={20} /> Back
             </button>
@@ -1442,85 +1458,133 @@
             </div>
           </div>
 
-          <div className="mb-6 print:hidden bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-             <label className="font-bold text-blue-900 whitespace-nowrap">Custom Sheet Header:</label>
-             <input type="text" value={customHeader} onChange={e => setCustomHeader(e.target.value)} className="flex-1 w-full p-2 rounded-lg border border-blue-200 outline-none font-bold text-gray-800" placeholder="Enter header text..." />
+          <div className="mb-6 print-hidden bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-col gap-4">
+             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                <label className="font-bold text-blue-900 whitespace-nowrap w-32">Custom Header:</label>
+                <input type="text" value={customHeader} onChange={e => setCustomHeader(e.target.value)} className="flex-1 w-full p-2 rounded-lg border border-blue-200 outline-none font-bold text-gray-800" placeholder="Enter header text..." />
+             </div>
+             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                <label className="font-bold text-blue-900 whitespace-nowrap w-32">Instructions:</label>
+                <input type="text" value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} className="flex-1 w-full p-2 rounded-lg border border-blue-200 outline-none font-medium text-gray-800" placeholder="Leave blank for no instructions" />
+             </div>
           </div>
 
-          {/* Printable Area - We attach the ref here for html2canvas to capture it cleanly */}
-          <div ref={printAreaRef} className="print-area w-full max-w-4xl mx-auto border-4 border-black p-8 relative bg-white">
-            <div className="absolute top-4 left-4 w-6 h-6 border-t-4 border-l-4 border-black"></div>
-            <div className="absolute top-4 right-4 w-6 h-6 border-t-4 border-r-4 border-black"></div>
-            <div className="absolute bottom-4 left-4 w-6 h-6 border-b-4 border-l-4 border-black"></div>
-            <div className="absolute bottom-4 right-4 w-6 h-6 border-b-4 border-r-4 border-black"></div>
+          {/* Absolute Absolute Positioning Print Wrapper - Strict Map to Optical Scanner zones */}
+          <div className="w-full flex justify-center">
+            <div 
+              ref={printAreaRef} 
+              className="print-area relative bg-white border-[6px] border-black overflow-hidden shadow-sm" 
+              style={{ width: '100%', maxWidth: '800px', aspectRatio: '8.5/11', boxSizing: 'border-box' }}
+            >
+              {/* Corner Registration Markers for manual checking if needed */}
+              <div className="absolute top-[2%] left-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-t-[6px] border-l-[6px] border-black"></div>
+              <div className="absolute top-[2%] right-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-t-[6px] border-r-[6px] border-black"></div>
+              <div className="absolute bottom-[2%] left-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-b-[6px] border-l-[6px] border-black"></div>
+              <div className="absolute bottom-[2%] right-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-b-[6px] border-r-[6px] border-black"></div>
 
-            <div className="text-center mb-8 border-b-2 border-black pb-4">
-              <h1 className="text-3xl font-black uppercase tracking-widest">{customHeader || " "}</h1>
-            </div>
+              {/* Title Section */}
+              <div className="absolute w-full text-center" style={{ top: '3%', left: '0', height: '6%' }}>
+                <h1 className="text-xl sm:text-3xl font-black uppercase tracking-widest text-black">{customHeader || " "}</h1>
+              </div>
 
-            <div className="flex justify-between gap-8 mb-8">
-              <div className="flex-1 border-2 border-black p-4 flex flex-col">
-                <div className="mb-4 border-b border-gray-300 pb-2">
-                  <p className="font-black text-xl uppercase tracking-widest text-black">{exam.name}</p>
+              {/* Information Section (Map: Top 15% to 35%, Left 5% to 50%) */}
+              <div className="absolute border-[3px] border-black p-2 sm:p-4 flex flex-col justify-between" style={{ top: '15%', left: '5%', width: '45%', height: '20%' }}>
+                <div className="border-b border-gray-300 pb-1 mb-1 sm:mb-2">
+                  <p className="font-black text-sm sm:text-lg uppercase tracking-widest text-black line-clamp-1">{exam.name}</p>
                 </div>
-                <div className="mb-4">
-                  <p className="font-bold mb-1">NAME:</p>
-                  <div className="border-b-2 border-black h-6 w-full"></div>
+                <div className="flex flex-col gap-1 sm:gap-2">
+                  <div className="flex items-end gap-2 w-full">
+                    <p className="font-bold text-[10px] sm:text-sm">NAME:</p>
+                    <div className="border-b-[2px] border-black flex-1 h-3 sm:h-4"></div>
+                  </div>
+                  <div className="flex items-end gap-2 w-full">
+                    <p className="font-bold text-[10px] sm:text-sm">CLASS:</p>
+                    <span className="flex-1 font-normal border-b-[2px] border-black text-[10px] sm:text-sm whitespace-nowrap overflow-hidden">{exam.className || ''}</span>
+                  </div>
                 </div>
-                <div className="mb-4">
-                  <p className="font-bold">CLASS: <span className="font-normal underline decoration-black underline-offset-4">{exam.className || '____________________'}</span></p>
-                </div>
-                <div className="flex justify-between mt-auto">
-                  <p className="font-bold">DATE: <span className="font-normal underline decoration-black underline-offset-4">________________</span></p>
-                  <p className="font-bold text-lg">SCORE: _____ / {exam.questions}</p>
+                <div className="flex justify-between items-end mt-auto gap-4">
+                  <div className="flex items-end gap-2 flex-1">
+                    <p className="font-bold text-[10px] sm:text-sm">DATE:</p>
+                    <div className="flex-1 border-b-[2px] border-black h-3 sm:h-4"></div>
+                  </div>
+                  <p className="font-bold text-[10px] sm:text-sm whitespace-nowrap">SCORE: ____ / {exam.questions}</p>
                 </div>
               </div>
-              
-              <div className="border-4 border-blue-900 p-4 flex flex-col items-center bg-gray-50/50">
-                 <p className="font-bold mb-2 uppercase text-sm tracking-widest text-blue-900">Roll No.</p>
-                 <div className="flex gap-2">
+
+              {/* Roll No Text Box Area (Top 9%, Left 55%, Width 35%, Height 6%) */}
+              <div className="absolute border-l-[3px] border-r-[3px] border-t-[3px] border-black bg-gray-50/30 px-1 sm:px-2 pt-1 flex flex-col items-center" style={{ top: '9%', left: '55%', width: '35%', height: '6%' }}>
+                 <p className="font-black text-[8px] sm:text-xs uppercase tracking-widest text-black flex-1 flex items-center">Roll No.</p>
+                 <div className="flex w-full pb-1 h-[60%]">
                    {Array.from({length: exam.rollNoLength || 4}).map((_, i) => (
-                     <div key={i} className="flex flex-col items-center gap-1.5">
-                        <div className="w-6 h-8 border-2 border-black bg-white mb-2"></div>
-                        {Array.from({length: 10}).map((_, n) => (
-                          <div key={n} className="w-5 h-5 rounded-full border border-black bg-white flex items-center justify-center text-[8px] font-bold">
-                            {n}
-                          </div>
-                        ))}
-                     </div>
+                      <div key={i} className="flex-1 flex justify-center items-center h-full border-r last:border-0 border-transparent">
+                         <div className="w-[80%] h-full border-[2px] border-black bg-white"></div>
+                      </div>
                    ))}
                  </div>
               </div>
-            </div>
 
-            <div className="border-2 border-green-900 p-4 bg-gray-50/30">
-               <p className="font-bold mb-4 text-center text-black pb-2 border-b border-gray-300">INSTRUCTIONS: Completely fill in the circle corresponding to your answer.</p>
-               <div className="flex justify-between gap-4">
-                  {Array.from({length: numCols}).map((_, cIdx) => (
-                    <div key={cIdx} className="flex-1 flex flex-col gap-2">
+              {/* Roll No Bubble Area (Scanned - Matches math: Top 15%, Left 55%, Height 20%, Width 35%) */}
+              <div className="absolute border-[3px] border-black bg-gray-50/50 flex" style={{ top: '15%', left: '55%', width: '35%', height: '20%' }}>
+                 {Array.from({length: exam.rollNoLength || 4}).map((_, c) => (
+                    <div key={c} className="flex-1 flex flex-col h-full border-r last:border-0 border-black/30">
+                       {Array.from({length: 10}).map((_, r) => (
+                         <div key={r} className="flex-1 w-full flex items-center justify-center">
+                            <div className="rounded-full border-[1px] sm:border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black"
+                                 style={{ height: '75%', maxWidth: '75%', aspectRatio: '1/1', fontSize: 'min(1.5vw, 10px)' }}>
+                              {r}
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                 ))}
+              </div>
+
+              {/* Answers Title (Top 36%, Left 5%, Width 90%) */}
+              <div className="absolute flex items-end pb-1 border-b-[2px] border-black" style={{ top: '35%', left: '5%', width: '90%', height: '4%' }}>
+                <p className="font-bold text-[8px] sm:text-[11px] text-black tracking-wide">
+                  {customInstructions}
+                </p>
+              </div>
+
+              {/* Answers Area (Scanned - Matches math: Top 40%, Left 5%, Height 55%, Width 90%) */}
+              <div className="absolute border-[3px] border-black flex" style={{ top: '40%', left: '5%', width: '90%', height: '55%' }}>
+                 {Array.from({length: numCols}).map((_, cIdx) => (
+                    <div key={cIdx} className="relative h-full border-r border-gray-300 last:border-0" style={{ width: `${100 / numCols}%` }}>
                        {Array.from({length: rowsPerCol}).map((_, rIdx) => {
-                         const qIdx = (cIdx * rowsPerCol) + rIdx;
-                         if (qIdx >= exam.questions) return null;
-                         const qData = exam.answerKey[qIdx];
-                         return (
-                           <div key={qIdx} className="flex items-center gap-2">
-                             <span className="w-6 text-right font-bold text-sm">{qIdx + 1}.</span>
-                             <div className="flex gap-1.5">
-                               {Array.from({length: qData.options}).map((_, oIdx) => {
-                                  const label = qData.type === 'true_false' ? (oIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + oIdx);
-                                  return (
-                                    <div key={oIdx} className="w-6 h-6 rounded-full border border-black bg-white flex items-center justify-center text-[10px] font-bold text-black">
-                                      {label}
-                                    </div>
-                                  )
-                               })}
+                          const qIdx = (cIdx * rowsPerCol) + rIdx;
+                          if (qIdx >= exam.questions) return null;
+                          const qData = exam.answerKey[qIdx];
+                          return (
+                             <div key={qIdx} className="absolute w-full flex items-center" style={{ top: `${(100 / rowsPerCol) * rIdx}%`, height: `${100 / rowsPerCol}%` }}>
+                                <div className="flex items-center justify-end pr-1 sm:pr-2" style={{ width: '30%', height: '100%' }}>
+                                   <span className="font-bold text-black" style={{ fontSize: 'min(1.5vw, 12px)' }}>{qIdx + 1}.</span>
+                                </div>
+                                <div className="flex items-center" style={{ width: '70%', height: '100%' }}>
+                                   {Array.from({length: maxOptions}).map((_, oIdx) => {
+                                      if (oIdx >= qData.options) return <div key={oIdx} style={{ width: `${100 / maxOptions}%` }} />;
+                                      const label = qData.type === 'true_false' ? (oIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + oIdx);
+                                      return (
+                                         <div key={oIdx} className="flex justify-center items-center h-full" style={{ width: `${100 / maxOptions}%` }}>
+                                            <div className="rounded-full border-[1px] sm:border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black"
+                                                 style={{
+                                                    height: '75%',
+                                                    maxWidth: '75%',
+                                                    aspectRatio: '1/1',
+                                                    fontSize: 'min(1.2vw, 10px)'
+                                                 }}>
+                                              {label}
+                                            </div>
+                                         </div>
+                                      );
+                                   })}
+                                </div>
                              </div>
-                           </div>
-                         );
+                          );
                        })}
                     </div>
-                  ))}
-               </div>
+                 ))}
+              </div>
+
             </div>
           </div>
         </div>
