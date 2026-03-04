@@ -90,10 +90,10 @@ export default function App() {
       try {
         await signInAnonymously(auth);
       } catch (err) {
-        // Silently catch to prevent the Canvas overlay error
-        setIsLocalMode(true);
+        console.error("Auth Error:", err);
+        // Identify specific restricted API key error
         if (err.code === 'auth/admin-restricted-operation') {
-           setAuthError("API Key restricted. Enable 'Identity Toolkit API' in Google Cloud to sync with Firebase.");
+           setAuthError("Your Firebase API Key is restricted. You must go to Google Cloud Console -> APIs & Services -> Credentials, edit your API Key, and enable the 'Identity Toolkit API'.");
         } else {
            setAuthError(err.message);
         }
@@ -109,7 +109,6 @@ export default function App() {
       }
       setLoading(false);
     }, (error) => {
-      setIsLocalMode(true);
       setAuthError(error.message);
       setLoading(false);
     });
@@ -119,25 +118,19 @@ export default function App() {
   // --- Data Fetching ---
   useEffect(() => {
     if (isLocalMode) {
-      setExams([...localExams].sort((a, b) => b.createdAt - a.createdAt));
+      setExams(localExams.sort((a, b) => b.createdAt - a.createdAt));
       return;
     }
     
     if (!user) return;
 
-    try {
-      const examsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'exams');
-      const unsubscribeExams = onSnapshot(examsRef, (snapshot) => {
-        const examsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setExams(examsData.sort((a, b) => b.createdAt - a.createdAt));
-      }, (error) => {
-        // Silent catch
-      });
+    const examsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'exams');
+    const unsubscribeExams = onSnapshot(examsRef, (snapshot) => {
+      const examsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setExams(examsData.sort((a, b) => b.createdAt - a.createdAt));
+    }, (error) => console.error("Exams fetch error:", error));
 
-      return () => unsubscribeExams();
-    } catch (e) {
-      setIsLocalMode(true);
-    }
+    return () => unsubscribeExams();
   }, [user, isLocalMode, localExams]);
 
   // Fetch specific exam data when selected
@@ -152,27 +145,23 @@ export default function App() {
 
     if (!user || !currentExam) return;
 
-    try {
-      const keyRef = collection(db, 'artifacts', appId, 'users', user.uid, `exams/${currentExam.id}/key`);
-      const unsubscribeKey = onSnapshot(keyRef, (snapshot) => {
-        const keyData = {};
-        snapshot.docs.forEach(doc => { keyData[doc.id] = doc.data().answer; });
-        setAnswerKeys(keyData);
-      });
+    const keyRef = collection(db, 'artifacts', appId, 'users', user.uid, `exams/${currentExam.id}/key`);
+    const unsubscribeKey = onSnapshot(keyRef, (snapshot) => {
+      const keyData = {};
+      snapshot.docs.forEach(doc => { keyData[doc.id] = doc.data().answer; });
+      setAnswerKeys(keyData);
+    });
 
-      const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, `exams/${currentExam.id}/results`);
-      const unsubscribeResults = onSnapshot(resultsRef, (snapshot) => {
-        const resData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setResults(resData.sort((a, b) => b.timestamp - a.timestamp));
-      });
+    const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, `exams/${currentExam.id}/results`);
+    const unsubscribeResults = onSnapshot(resultsRef, (snapshot) => {
+      const resData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setResults(resData.sort((a, b) => b.timestamp - a.timestamp));
+    });
 
-      return () => {
-        unsubscribeKey();
-        unsubscribeResults();
-      };
-    } catch (e) {
-      // Silent catch
-    }
+    return () => {
+      unsubscribeKey();
+      unsubscribeResults();
+    };
   }, [user, currentExam, isLocalMode, localKeys, localResults]);
 
   // --- Handlers (Support both Firebase and Local Mode) ---
@@ -204,7 +193,7 @@ export default function App() {
       await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'exams', examId));
       if (currentExam?.id === examId) navigate('dashboard');
     } catch (err) {
-      // Silent catch
+      console.error("Delete error:", err);
     }
   };
 
@@ -221,7 +210,7 @@ export default function App() {
       const docRef = doc(db, 'artifacts', appId, 'users', user.uid, `exams/${examId}/key`, qNum.toString());
       await setDoc(docRef, { answer: optionIndex });
     } catch (err) {
-      // Silent catch
+      console.error("Save key error:", err);
     }
   };
 
@@ -237,11 +226,40 @@ export default function App() {
     try {
       await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, `exams/${examId}/results`), resultData);
     } catch (err) {
-      // Silent catch
+      console.error("Save result error:", err);
     }
   };
 
   // --- Renderers ---
+  if (authError && !isLocalMode) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
+        <AlertCircle className="text-red-500 mb-4" size={48} />
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Firebase Connection Error</h2>
+        <p className="text-gray-600 mb-6 max-w-md bg-red-50 p-3 rounded-lg border border-red-100">{authError}</p>
+        
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 text-left text-sm text-gray-700 max-w-md w-full">
+          <p className="font-bold mb-3 text-red-600 text-base">How to fix this in Google Cloud / Firebase:</p>
+          <ol className="list-decimal pl-5 space-y-3 mb-6">
+            <li>Go to the Google Cloud Console for your project <b>examscanner-e90dd</b>.</li>
+            <li>Navigate to <b>APIs & Services</b> &gt; <b>Credentials</b>.</li>
+            <li>Click on your active API Key (`AIzaSyAUA...`).</li>
+            <li>Under API restrictions, either select "Don't restrict key" OR ensure <b>Identity Toolkit API</b> is checked.</li>
+            <li>Ensure <b>Anonymous</b> auth is enabled in Firebase Authentication.</li>
+          </ol>
+          <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
+            <Button onClick={() => window.location.reload()} variant="primary" className="w-full" icon={RefreshCw}>
+              I've fixed it, Reload App
+            </Button>
+            <Button onClick={() => setIsLocalMode(true)} variant="outline" className="w-full" icon={Play}>
+              Test App in Offline / Demo Mode
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (loading && !isLocalMode) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50"><RefreshCw className="animate-spin text-blue-600" size={32} /></div>;
   }
@@ -273,20 +291,6 @@ export default function App() {
           {view === 'dashboard' && <div className={`${isLocalMode ? 'bg-orange-500' : 'bg-blue-500'} p-2 rounded-full`}><Camera size={20} /></div>}
         </div>
       </header>
-      
-      {/* Error Banner */}
-      {authError && isLocalMode && (
-        <div className="bg-orange-50 border-b border-orange-200 p-3 flex items-start gap-2 text-sm text-orange-800 animate-in slide-in-from-top-2">
-          <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
-          <div className="flex-1">
-            <p className="font-semibold">Cloud Sync Disabled</p>
-            <p className="text-xs mt-0.5">{authError}</p>
-          </div>
-          <button onClick={() => setAuthError('')} className="text-orange-500 hover:text-orange-700">
-            <XCircle size={16} />
-          </button>
-        </div>
-      )}
 
       {/* Main Content Area */}
       <main className="max-w-md mx-auto relative min-h-[calc(100vh-64px)]">
@@ -401,7 +405,7 @@ function CreateExam({ onSave, onNavigate }) {
       const savedExam = await onSave(newExam);
       onNavigate('exam-detail', savedExam);
     } catch (err) {
-      // Silent catch
+      console.error("Error creating exam:", err);
     }
     setSaving(false);
   };
@@ -691,7 +695,7 @@ function Scanner({ exam, onNavigate }) {
         }
         setStream(activeStream);
       } catch (err) {
-        // Silent catch for camera access
+        console.error("Camera access failed", err);
         setError('Camera access denied or unavailable. Please use a device with a camera.');
       }
     };
@@ -840,7 +844,7 @@ function ReviewScan({ exam, answerKeys, onSaveResult, onNavigate }) {
       await onSaveResult(exam.id, resultData);
       onNavigate('exam-detail');
     } catch (err) {
-      // Silent catch
+      console.error("Save result error:", err);
       setSaving(false);
     }
   };
