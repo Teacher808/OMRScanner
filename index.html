@@ -64,8 +64,7 @@
         projectId: "examscanner-e90dd",
         storageBucket: "examscanner-e90dd.firebasestorage.app",
         messagingSenderId: "13021828091",
-        appId: "1:13021828091:web:2c8b947cd823a4befbf15e",
-        measurementId: "G-HGY1039P8L"
+        appId: "1:13021828091:web:2c8b947cd823a4befbf15e"
       };
     }
     
@@ -1091,7 +1090,7 @@
       };
 
       useEffect(() => {
-          if (stream && !result && !isProcessing) {
+          if (stream && !result && !isProcessing && autoScanEnabled) {
               scanLoopRef.current = requestAnimationFrame(checkAlignmentLoop);
           }
           return () => {
@@ -1847,4 +1846,3 @@
   </script>
 </body>
 </html>
-
