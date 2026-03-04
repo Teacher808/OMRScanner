@@ -59,12 +59,13 @@
     } else {
       // REPLACE THIS WITH YOUR OWN FIREBASE CONFIG IF HOSTING EXTERNALLY
       firebaseConfig = {
-      apiKey: "AIzaSyAUAqxd3hdWp0BRoG4nFTZCamry7io7k-E",
-      authDomain: "examscanner-e90dd.firebaseapp.com",
-      projectId: "examscanner-e90dd",
-      storageBucket: "examscanner-e90dd.firebasestorage.app",
-      messagingSenderId: "13021828091",
-      appId: "1:13021828091:web:2c8b947cd823a4befbf15e"
+        apiKey: "AIzaSyDQ1oFts4jTQ50MZ3UfjEPjJFX3o3l3mlc",
+        authDomain: "easyomr-99a32.firebaseapp.com",
+        projectId: "easyomr-99a32",
+        storageBucket: "easyomr-99a32.firebasestorage.app",
+        messagingSenderId: "545734045836",
+        appId: "1:545734045836:web:d963157f9a2e3576c94ba9",
+        measurementId: "G-HGY1039P8L"
       };
     }
     
@@ -104,7 +105,7 @@
 
       if (!message) return null;
       return (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce">
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce z-50">
           <Icon name="CheckCircle" size={16} className="text-green-400" />
           <span className="font-medium text-sm">{message}</span>
         </div>
@@ -772,9 +773,10 @@
     // --- SCANNER COMPONENT (OMR LOGIC) ---
     function Scanner({ exam, classes, setView, saveExam, setCurrentExam, showToast }) {
       const videoRef = useRef(null);
-      const paperRef = useRef(null); // Reference for the visual bounds
+      const trackingCanvasRef = useRef(null);
+      const overlayCanvasRef = useRef(null);
       const scanLoopRef = useRef(null);
-      const canvasRef = useRef(null);
+      const lastValidQuad = useRef(null);
       
       const [stream, setStream] = useState(null);
       const [result, setResult] = useState(null);
@@ -810,122 +812,107 @@
         };
       }, []);
 
-      const calculateDarkness = (data) => {
-        let total = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          const brightness = (data[i] + data[i+1] + data[i+2]) / 3;
-          total += (255 - brightness); 
-        }
-        return total / (data.length / 4);
+      // Calculate quad-perspective mapped point to support tilted/rotated scanning
+      const getMappedPoint = (templateX, templateY, quads) => {
+          // The center of the 40x40 black corner markers is exactly at 20px inward on the 816x1056 paper.
+          const u = (templateX - 20) / (816 - 40);
+          const v = (templateY - 20) / (1056 - 40);
+          
+          // Bilinear interpolation mapping standard rectangle to the detected quad
+          const x = quads.tl.x * (1-u)*(1-v) + quads.tr.x * u*(1-v) + quads.bl.x * (1-u)*v + quads.br.x * u*v;
+          const y = quads.tl.y * (1-u)*(1-v) + quads.tr.y * u*(1-v) + quads.bl.y * (1-u)*v + quads.br.y * u*v;
+          return {x, y};
       };
 
       const processImage = () => {
-        if (!videoRef.current || !paperRef.current) return;
+        if (!videoRef.current) return;
+        if (!lastValidQuad.current) {
+           showToast("Could not find the 4 corner markers! Please align within the guide.");
+           return;
+        }
+
         setIsProcessing(true);
         if (scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
 
         const video = videoRef.current;
-        const paper = paperRef.current;
-        
-        // 1. Map the visual UI box to exact video pixels
-        const videoRect = video.getBoundingClientRect();
-        const paperRect = paper.getBoundingClientRect();
-
-        const scaleX = video.videoWidth / videoRect.width;
-        const scaleY = video.videoHeight / videoRect.height;
-
-        const px = (paperRect.left - videoRect.left) * scaleX;
-        const py = (paperRect.top - videoRect.top) * scaleY;
-        const pw = paperRect.width * scaleX;
-        const ph = paperRect.height * scaleY;
-
-        // 2. Crop exactly to the paper area to match generated template layout
         const canvas = document.createElement('canvas');
-        canvas.width = pw;
-        canvas.height = ph;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, px, py, pw, ph, 0, 0, pw, ph);
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        const W = pw;
-        const H = ph;
-
-        // --- ZONE MATHEMATICS (Matches generated absolute positioning exactly) ---
-        // 1. Roll Number Zone (Left: 55%, Top: 10%, Width: 40%, Height: 24%)
-        const rnStartX = W * 0.55;
-        const rnStartY = H * 0.10;
-        const rnTotalW = W * 0.40;
-        const rnTotalH = H * 0.24;
+        const quads = lastValidQuad.current;
         
-        const rnColW = rnTotalW / rnLength;
-        const rnBubbleZoneY = rnStartY + (rnTotalH * 0.30); // Below title and text box
-        const rnBubbleZoneH = rnTotalH * 0.70;
-        const actualRnRowH = rnBubbleZoneH / 10;
-        const rnBoxSize = Math.min(rnColW * 0.5, actualRnRowH * 0.5);
+        // Calculate dynamic bubble size based on the detected perspective quad size
+        const quadScale = Math.hypot(quads.tl.x - quads.tr.x, quads.tl.y - quads.tr.y) / 816;
+        
+        const sampleDarkness = (templateX, templateY, baseSize) => {
+            const p = getMappedPoint(templateX, templateY, quads);
+            const size = Math.max(4, Math.floor(baseSize * quadScale));
+            
+            const sx = Math.floor(p.x - size/2);
+            const sy = Math.floor(p.y - size/2);
+            
+            if(sx < 0 || sy < 0 || sx+size > canvas.width || sy+size > canvas.height) return 0;
+            
+            const imgData = ctx.getImageData(sx, sy, size, size).data;
+            let total = 0;
+            for(let i=0; i<imgData.length; i+=4) {
+                total += 255 - ((imgData[i] + imgData[i+1] + imgData[i+2]) / 3);
+            }
+            return total / (imgData.length / 4);
+        };
 
+        // --- EXTRACT ROLL NUMBER ---
         let scannedRollNo = '';
+        const rnStartX = 816 * 0.55;
+        const rnTotalW = 816 * 0.40;
+        const rnColW = rnTotalW / rnLength;
+        const rnBubbleZoneY = 1056 * 0.10 + 30;
+        const rnBubbleZoneH = (1056 * 0.24) - 30;
+        const actualRnRowH = rnBubbleZoneH / 10;
 
         for (let c = 0; c < rnLength; c++) {
-          let maxD = 0;
-          let bestVal = -1;
+          let maxD = 0; let bestVal = -1;
+          const cellCenterX = rnStartX + (c * rnColW) + (rnColW / 2);
           for (let r = 0; r < 10; r++) {
-            const cellCenterX = rnStartX + (c * rnColW) + (rnColW / 2);
             const cellCenterY = rnBubbleZoneY + (r * actualRnRowH) + (actualRnRowH / 2);
-            
-            const sx = cellCenterX - (rnBoxSize / 2);
-            const sy = cellCenterY - (rnBoxSize / 2);
-            
-            const imgD = ctx.getImageData(sx, sy, rnBoxSize, rnBoxSize);
-            const d = calculateDarkness(imgD.data);
-            
-            if (d > maxD && d > 40) { 
-              maxD = d;
-              bestVal = r;
-            }
+            const d = sampleDarkness(cellCenterX, cellCenterY, 14); // 14 is base sample size
+            if (d > maxD && d > 60) { maxD = d; bestVal = r; }
           }
           scannedRollNo += bestVal !== -1 ? bestVal.toString() : '?';
         }
 
-        // --- 2. Answers Zone (Left: 5%, Top: 40%, Width: 90%, Height: 55%) ---
-        const ansStartX = W * 0.05;
-        const ansStartY = H * 0.40;
-        const ansTotalW = W * 0.90;
-        const ansTotalH = H * 0.55;
-
-        const ansColW = ansTotalW / numCols;
-        const ansRowH = ansTotalH / rowsPerCol;
-        const maxOptions = Math.max(...exam.answerKey.map(q => q.options));
-        const optAreaW = ansColW * 0.7; // Leave 30% width for question numbers
-        const cellW = optAreaW / maxOptions;
-        const boxSize = Math.min(cellW * 0.6, ansRowH * 0.6);
-
+        // --- EXTRACT ANSWERS ---
         let scannedAnswers = [];
         let score = 0;
+
+        const ansStartX = 816 * 0.05;
+        const ansStartY = 1056 * 0.40;
+        const ansTotalW = 816 * 0.90;
+        const ansTotalH = 1056 * 0.55;
+        const colW = ansTotalW / numCols;
+        const rowH = ansTotalH / rowsPerCol;
 
         for (let q = 0; q < exam.questions; q++) {
           const qData = exam.answerKey[q];
           const cIdx = Math.floor(q / rowsPerCol);
           const rIdx = q % rowsPerCol;
           
-          const qStartX = ansStartX + (cIdx * ansColW) + (ansColW * 0.35); // offset past Q number
-          const qStartY = ansStartY + (rIdx * ansRowH);
+          const qStartX = ansStartX + (cIdx * colW);
+          const qStartY = ansStartY + (rIdx * rowH);
+          
+          const optStartX = qStartX + colW * 0.35;
+          const optW = colW * 0.65;
 
-          let maxD = 0;
-          let bestOpt = -1;
+          let maxD = 0; let bestOpt = -1;
 
           for (let o = 0; o < qData.options; o++) {
-            const cellCenterX = qStartX + (o * cellW) + (cellW / 2);
-            const cellCenterY = qStartY + (ansRowH / 2);
+            const cellCenterX = optStartX + (optW / qData.options) * (o + 0.5);
+            const cellCenterY = qStartY + rowH / 2;
 
-            const sx = cellCenterX - (boxSize / 2);
-            const sy = cellCenterY - (boxSize / 2);
-
-            const imgD = ctx.getImageData(sx, sy, boxSize, boxSize);
-            const d = calculateDarkness(imgD.data);
-
-            if (d > maxD && d > 40) {
-              maxD = d;
-              bestOpt = o;
-            }
+            const d = sampleDarkness(cellCenterX, cellCenterY, 16);
+            if (d > maxD && d > 60) { maxD = d; bestOpt = o; }
           }
           scannedAnswers.push(bestOpt);
           if (bestOpt === qData.answer) score++;
@@ -954,62 +941,157 @@
         setIsAligned(false);
       };
 
-      // --- AUTO SCAN TRACING LOOP ---
+      // --- AUTO SCAN TRACING LOOP (EVALBEE STYLE) ---
       const checkAlignmentLoop = () => {
-        if (!autoScanEnabled || isProcessing || result) return;
+        if (isProcessing || result) return;
 
         const video = videoRef.current;
-        const paper = paperRef.current;
+        const tracking = trackingCanvasRef.current;
+        const overlay = overlayCanvasRef.current;
 
-        if (video && video.readyState === video.HAVE_ENOUGH_DATA && paper) {
-            const videoRect = video.getBoundingClientRect();
-            const paperRect = paper.getBoundingClientRect();
+        if (video && video.readyState === video.HAVE_ENOUGH_DATA && tracking && overlay) {
+            
+            // Sync overlay canvas to actual display pixels
+            overlay.width = video.clientWidth;
+            overlay.height = video.clientHeight;
 
-            const scaleX = video.videoWidth / videoRect.width;
-            const scaleY = video.videoHeight / videoRect.height;
+            const tw = tracking.width;
+            const th = tracking.height;
+            const ctxT = tracking.getContext('2d', { willReadFrequently: true });
+            ctxT.drawImage(video, 0, 0, tw, th);
+            const imgData = ctxT.getImageData(0, 0, tw, th).data;
 
-            const px = (paperRect.left - videoRect.left) * scaleX;
-            const py = (paperRect.top - videoRect.top) * scaleY;
-            const pw = paperRect.width * scaleX;
-            const ph = paperRect.height * scaleY;
+            // Algorithm to quickly find darkest density in a specific search region
+            const findDarkestBlock = (startX, startY, radius) => {
+                let bestAvg = 255; let bestX = startX; let bestY = startY;
+                const bs = 8; // block size to sample
+                const minX = Math.max(0, Math.floor(startX - radius));
+                const maxX = Math.min(tw - bs, Math.floor(startX + radius));
+                const minY = Math.max(0, Math.floor(startY - radius));
+                const maxY = Math.min(th - bs, Math.floor(startY + radius));
 
-            // Sample the 4 absolute corners of the paper bounding box to trace the solid black squares
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0);
-
-            const getDarkness = (x, y, size) => {
-                const imgD = ctx.getImageData(x, y, size, size);
-                return calculateDarkness(imgD.data);
+                for (let y = minY; y < maxY; y += 2) {
+                    for (let x = minX; x < maxX; x += 2) {
+                        let sum = 0;
+                        for(let by=0; by<bs; by+=2){
+                            for(let bx=0; bx<bs; bx+=2){
+                                const idx = ((y+by)*tw + (x+bx))*4;
+                                sum += (imgData[idx] + imgData[idx+1] + imgData[idx+2])/3;
+                            }
+                        }
+                        const avg = sum/16; // 4x4 samples (bs=8, step=2)
+                        if (avg < bestAvg) {
+                            bestAvg = avg;
+                            bestX = x + bs/2;
+                            bestY = y + bs/2;
+                        }
+                    }
+                }
+                return { x: bestX, y: bestY, brightness: bestAvg };
             };
-            // Sample a 5% block in corners
-            const cornerSize = Math.max(10, pw * 0.05); 
-            const tl = getDarkness(px, py, cornerSize);
-            const tr = getDarkness(px + pw - cornerSize, py, cornerSize);
-            const bl = getDarkness(px, py + ph - cornerSize, cornerSize);
-            const br = getDarkness(px + pw - cornerSize, py + ph - cornerSize, cornerSize);
 
-            // If all 4 corners are dark (black registration marks)
-            if (tl > 60 && tr > 60 && bl > 60 && br > 60) {
-                alignmentFrames.current += 1;
+            // Expected Paper bounding box to create our Search Regions
+            const expectedW = th * 0.9 * (816/1056);
+            const expectedH = th * 0.9;
+            const cx = tw / 2; const cy = th / 2;
+            
+            const expTL = { x: cx - expectedW/2, y: cy - expectedH/2 };
+            const expTR = { x: cx + expectedW/2, y: cy - expectedH/2 };
+            const expBL = { x: cx - expectedW/2, y: cy + expectedH/2 };
+            const expBR = { x: cx + expectedW/2, y: cy + expectedH/2 };
+
+            const searchRadius = tw * 0.15; // Fairly wide catch radius
+
+            const tl = findDarkestBlock(expTL.x, expTL.y, searchRadius);
+            const tr = findDarkestBlock(expTR.x, expTR.y, searchRadius);
+            const bl = findDarkestBlock(expBL.x, expBL.y, searchRadius);
+            const br = findDarkestBlock(expBR.x, expBR.y, searchRadius);
+
+            const thresh = 90; // Marker must be relatively black
+            let validQuad = null;
+
+            if (tl.brightness < thresh && tr.brightness < thresh && bl.brightness < thresh && br.brightness < thresh) {
+                // Verify Geometry (Is it actually rectangular-ish?)
+                const wTop = Math.hypot(tl.x - tr.x, tl.y - tr.y);
+                const wBot = Math.hypot(bl.x - br.x, bl.y - br.y);
+                const lH = Math.hypot(tl.x - bl.x, tl.y - bl.y);
+                const rH = Math.hypot(tr.x - br.x, tr.y - br.y);
+                
+                if (Math.abs(wTop - wBot) < wTop * 0.3 && Math.abs(lH - rH) < lH * 0.3 && wTop > tw * 0.3) {
+                    const scaleX = video.videoWidth / tw;
+                    const scaleY = video.videoHeight / th;
+                    validQuad = {
+                        tl: {x: tl.x * scaleX, y: tl.y * scaleY},
+                        tr: {x: tr.x * scaleX, y: tr.y * scaleY},
+                        bl: {x: bl.x * scaleX, y: bl.y * scaleY},
+                        br: {x: br.x * scaleX, y: br.y * scaleY},
+                    };
+                    lastValidQuad.current = validQuad;
+                }
+            }
+
+            // --- DRAW MAGNETIC OVERLAY ---
+            const ctxO = overlay.getContext('2d');
+            ctxO.clearRect(0, 0, overlay.width, overlay.height);
+
+            if (validQuad) {
                 setIsAligned(true);
-                // 5 frames at ~60fps equals near-instant capture once stabilized
-                if (alignmentFrames.current > 5) { 
+                alignmentFrames.current += 1;
+
+                // Draw solid green perspective tracker
+                ctxO.strokeStyle = '#22c55e'; // Green
+                ctxO.lineWidth = 4;
+                ctxO.beginPath();
+                const dX = overlay.width / video.videoWidth;
+                const dY = overlay.height / video.videoHeight;
+                ctxO.moveTo(validQuad.tl.x * dX, validQuad.tl.y * dY);
+                ctxO.lineTo(validQuad.tr.x * dX, validQuad.tr.y * dY);
+                ctxO.lineTo(validQuad.br.x * dX, validQuad.br.y * dY);
+                ctxO.lineTo(validQuad.bl.x * dX, validQuad.bl.y * dY);
+                ctxO.closePath();
+                ctxO.stroke();
+                ctxO.fillStyle = 'rgba(34, 197, 94, 0.15)'; // Light green tint
+                ctxO.fill();
+
+                if (autoScanEnabled && alignmentFrames.current > 5) {
                     processImage();
-                    return; 
+                    return;
                 }
             } else {
-                alignmentFrames.current = 0;
                 setIsAligned(false);
+                alignmentFrames.current = 0;
+
+                // Draw expected target guide
+                const tW = overlay.height * 0.85 * (816/1056);
+                const tH = overlay.height * 0.85;
+                const tX = (overlay.width - tW) / 2;
+                const tY = (overlay.height - tH) / 2;
+
+                ctxO.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+                ctxO.setLineDash([10, 10]);
+                ctxO.lineWidth = 2;
+                ctxO.strokeRect(tX, tY, tW, tH);
+                ctxO.setLineDash([]);
+                
+                // Draw corner hints
+                const L = 20;
+                ctxO.lineWidth = 4;
+                ctxO.strokeStyle = '#ef4444'; // Red
+                // TL
+                ctxO.beginPath(); ctxO.moveTo(tX, tY+L); ctxO.lineTo(tX, tY); ctxO.lineTo(tX+L, tY); ctxO.stroke();
+                // TR
+                ctxO.beginPath(); ctxO.moveTo(tX+tW-L, tY); ctxO.lineTo(tX+tW, tY); ctxO.lineTo(tX+tW, tY+L); ctxO.stroke();
+                // BL
+                ctxO.beginPath(); ctxO.moveTo(tX, tY+tH-L); ctxO.lineTo(tX, tY+tH); ctxO.lineTo(tX+L, tY+tH); ctxO.stroke();
+                // BR
+                ctxO.beginPath(); ctxO.moveTo(tX+tW-L, tY+tH); ctxO.lineTo(tX+tW, tY+tH); ctxO.lineTo(tX+tW, tY+tH-L); ctxO.stroke();
             }
         }
         scanLoopRef.current = requestAnimationFrame(checkAlignmentLoop);
       };
 
       useEffect(() => {
-          if (stream && !result && !isProcessing && autoScanEnabled) {
+          if (stream && !result && !isProcessing) {
               scanLoopRef.current = requestAnimationFrame(checkAlignmentLoop);
           }
           return () => {
@@ -1057,43 +1139,29 @@
           </div>
 
           {!result ? (
-            <div className="relative flex-1 bg-black rounded-2xl overflow-hidden shadow-2xl border-4 border-gray-900">
+            <div className="relative flex-1 bg-black rounded-2xl overflow-hidden shadow-2xl border-4 border-gray-900 flex flex-col justify-center items-center">
               <video 
                 ref={videoRef} autoPlay playsInline 
                 className="absolute inset-0 w-full h-full object-cover opacity-80"
               />
               
-              {/* TARGETING OVERLAY - Maps exactly to 8.5x11 paper aspect ratio */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
-                 <div ref={paperRef} className={`relative border-[3px] transition-colors duration-200 ${isAligned ? 'border-green-500 bg-green-500/20' : 'border-red-500 bg-red-500/10'}`} 
-                      style={{ aspectRatio: '816/1056', maxHeight: '100%', maxWidth: '100%' }}>
-                    
-                    <span className={`absolute -top-8 left-1/2 transform -translate-x-1/2 text-xs font-black bg-black/80 px-4 py-1.5 rounded-full whitespace-nowrap transition-colors ${isAligned ? 'text-green-400' : 'text-red-400'}`}>
-                       {isAligned ? 'HOLD STILL...' : 'ALIGN 4 BLACK CORNERS INSIDE RED BOX'}
-                    </span>
+              {/* Dynamic Tracking Overlay */}
+              <canvas ref={overlayCanvasRef} className="absolute inset-0 w-full h-full z-10 pointer-events-none" />
+              
+              {/* Hidden fast-processing canvas */}
+              <canvas ref={trackingCanvasRef} width={320} height={240} className="hidden" />
 
-                    {/* Corner Guides representing the 4 black blocks */}
-                    <div className={`absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 ${isAligned ? 'border-green-500' : 'border-red-500'}`}></div>
-                    <div className={`absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 ${isAligned ? 'border-green-500' : 'border-red-500'}`}></div>
-                    <div className={`absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 ${isAligned ? 'border-green-500' : 'border-red-500'}`}></div>
-                    <div className={`absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 ${isAligned ? 'border-green-500' : 'border-red-500'}`}></div>
-
-                    {/* Roll No Zone Highlight */}
-                    <div className="absolute border border-blue-400/50 bg-blue-400/10"
-                         style={{ left: '55%', top: '10%', width: '40%', height: '24%' }}>
-                    </div>
-                    {/* Answers Zone Highlight */}
-                    <div className="absolute border border-green-400/50 bg-green-400/10"
-                         style={{ left: '5%', top: '40%', width: '90%', height: '55%' }}>
-                    </div>
-                 </div>
-              </div>
+              {!isAligned && (
+                 <span className="absolute top-4 left-1/2 transform -translate-x-1/2 text-xs font-black bg-black/80 text-white px-4 py-1.5 rounded-full whitespace-nowrap z-20 shadow-md">
+                   HOLD VERTICALLY • ALIGN 4 BLACK CORNERS
+                 </span>
+              )}
 
               {!autoScanEnabled && (
                 <button 
                   onClick={processImage}
                   disabled={isProcessing}
-                  className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white text-blue-600 font-black py-4 px-10 rounded-full shadow-[0_4px_20px_rgba(255,255,255,0.4)] hover:scale-105 transition disabled:opacity-50 text-lg z-10"
+                  className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white text-blue-600 font-black py-4 px-10 rounded-full shadow-[0_4px_20px_rgba(255,255,255,0.4)] hover:scale-105 transition disabled:opacity-50 text-lg z-20"
                 >
                   {isProcessing ? 'Reading...' : 'Capture Image'}
                 </button>
@@ -1172,7 +1240,6 @@
               </div>
             </div>
           )}
-          <canvas ref={canvasRef} className="hidden" />
         </div>
       );
     }
@@ -1695,24 +1762,26 @@
               </div>
 
               {/* Roll No Box (Top 10%, Left 55%, Width 40%, Height 24%) */}
-              <div className="absolute border-2 border-black p-2 flex flex-col items-center bg-white" style={{ left: '55%', top: '10%', width: '40%', height: '24%' }}>
-                 <p className="font-bold uppercase tracking-widest text-black mb-1" style={{ fontSize: '14px' }}>Roll No.</p>
-                 <div className="flex w-full flex-1 border-[2px] border-black">
+              <div className="absolute border-2 border-black p-2 bg-white" style={{ left: '55%', top: '10%', width: '40%', height: '24%' }}>
+                 <p className="font-bold uppercase tracking-widest text-black mb-1 text-center" style={{ fontSize: '14px', height: '20px' }}>Roll No.</p>
+                 <div className="absolute border-[2px] border-black left-2 right-2 bottom-2" style={{ top: '30px' }}>
                    {Array.from({length: exam.rollNoLength || 4}).map((_, c) => (
-                      <div key={c} className="flex-1 flex flex-col border-r border-black last:border-r-0 h-full">
+                      <div key={c} className="absolute h-full border-r border-black last:border-r-0" style={{ left: `${(100/(exam.rollNoLength || 4))*c}%`, width: `${100/(exam.rollNoLength || 4)}%` }}>
                          {/* Empty box at the top for writing the digit */}
-                         <div className="h-[30px] w-full border-b border-black shrink-0"></div>
+                         <div className="absolute top-0 w-full border-b border-black" style={{ height: '30px' }}></div>
                          
-                         {/* The 0 to 9 column */}
-                         <div className="flex flex-col justify-evenly items-center flex-1 py-1">
+                         {/* The 0 to 9 column precisely math-positioned */}
+                         <div className="absolute w-full bottom-0" style={{ top: '30px' }}>
                            {Array.from({length: 10}).map((_, r) => (
-                             <div key={r} className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black box-border shrink-0"
-                                  style={{ 
-                                    width: `${rnBubbleSize}px`, 
-                                    height: `${rnBubbleSize}px`, 
-                                    fontSize: `${rnFontSize}px`
-                                  }}>
-                               <span style={{ display: 'block', marginTop: '-8px' }}>{r}</span>
+                             <div key={r} className="absolute w-full flex items-center justify-center" style={{ top: `${(100/10)*r}%`, height: `${100/10}%` }}>
+                                 <div className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black box-border"
+                                      style={{ 
+                                        width: `${rnBubbleSize}px`, 
+                                        height: `${rnBubbleSize}px`, 
+                                        fontSize: `${rnFontSize}px`
+                                      }}>
+                                   <span style={{ display: 'block', marginTop: '-8px' }}>{r}</span>
+                                 </div>
                              </div>
                            ))}
                          </div>
@@ -1729,29 +1798,31 @@
               </div>
 
               {/* Answers Area (Top 40%, Left 5%, Width 90%, Height 55%) */}
-              <div className="absolute border-[3px] border-black flex bg-white" style={{ left: '5%', top: '40%', width: '90%', height: '55%' }}>
+              <div className="absolute border-[3px] border-black bg-white" style={{ left: '5%', top: '40%', width: '90%', height: '55%' }}>
                  {Array.from({length: numCols}).map((_, cIdx) => (
-                    <div key={cIdx} className="relative h-full border-r-2 border-gray-300 last:border-0" style={{ width: `${100 / numCols}%` }}>
+                    <div key={cIdx} className="absolute h-full border-r-2 border-gray-300 last:border-0" style={{ left: `${(100/numCols)*cIdx}%`, width: `${100 / numCols}%` }}>
                        {Array.from({length: rowsPerCol}).map((_, rIdx) => {
                           const qIdx = (cIdx * rowsPerCol) + rIdx;
-                          if (qIdx >= exam.questions) return <div key={rIdx} style={{ height: `${ansBubbleSize}px` }} className="w-full pointer-events-none opacity-0"></div>;
+                          if (qIdx >= exam.questions) return null;
                           const qData = exam.answerKey[qIdx];
                           return (
                              <div key={qIdx} className="absolute w-full flex items-center" style={{ top: `${(100 / rowsPerCol) * rIdx}%`, height: `${100 / rowsPerCol}%` }}>
-                                <div className="flex items-center justify-end pr-2" style={{ width: '35%', height: '100%' }}>
+                                <div className="absolute left-0 h-full flex items-center justify-end pr-2" style={{ width: '35%' }}>
                                    <span className="font-bold text-black" style={{ fontSize: `${ansFontSize + 2}px` }}>{qIdx + 1}.</span>
                                 </div>
-                                <div className="flex items-center justify-around" style={{ width: '65%', height: '100%' }}>
+                                <div className="absolute right-0 h-full" style={{ width: '65%' }}>
                                    {Array.from({length: qData.options}).map((_, oIdx) => {
                                       const label = qData.type === 'true_false' ? (oIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + oIdx);
                                       return (
-                                         <div key={oIdx} className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black shrink-0"
-                                              style={{
-                                                 width: `${ansBubbleSize}px`,
-                                                 height: `${ansBubbleSize}px`,
-                                                 fontSize: `${ansFontSize}px`
-                                              }}>
-                                           <span style={{ display: 'block', marginTop: '-8px' }}>{label}</span>
+                                         <div key={oIdx} className="absolute h-full flex items-center justify-center" style={{ left: `${(100/qData.options)*oIdx}%`, width: `${100/qData.options}%` }}>
+                                            <div className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black shrink-0"
+                                                 style={{
+                                                    width: `${ansBubbleSize}px`,
+                                                    height: `${ansBubbleSize}px`,
+                                                    fontSize: `${ansFontSize}px`
+                                                 }}>
+                                              <span style={{ display: 'block', marginTop: '-8px' }}>{label}</span>
+                                            </div>
                                          </div>
                                       );
                                    })}
@@ -1776,4 +1847,3 @@
   </script>
 </body>
 </html>
-
