@@ -268,6 +268,21 @@
         } catch (e) { console.error("Error saving class", e); showToast("Error saving class"); }
       };
 
+      const deleteClass = async (classId) => {
+        if (!user || !db) return;
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'classes', classId));
+          showToast("Class deleted successfully");
+          if (currentClass && currentClass.id === classId) {
+            setCurrentClass(null);
+            setView('classes');
+          }
+        } catch (e) {
+          console.error("Error deleting class", e);
+          showToast("Error deleting class");
+        }
+      };
+
       const handleLogout = () => {
         if (auth) signOut(auth);
       };
@@ -360,6 +375,7 @@
                 saveClass={saveClass}
                 setView={setView} 
                 setCurrentClass={setCurrentClass} 
+                deleteClass={deleteClass}
               />
             )}
             {view === 'class_details' && currentClass && (
@@ -1087,8 +1103,9 @@
     }
 
     // --- ROSTER: CLASSES MANAGER ---
-    function ClassesManager({ classes, saveClass, setView, setCurrentClass }) {
+    function ClassesManager({ classes, saveClass, setView, setCurrentClass, deleteClass }) {
       const [newClassName, setNewClassName] = useState('');
+      const [confirmDelete, setConfirmDelete] = useState(null);
       
       const handleCreate = () => {
         if (!newClassName.trim()) return;
@@ -1123,19 +1140,36 @@
                </div>
             ) : (
               classes.map(cls => (
-                <div key={cls.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center transition hover:shadow-md">
+                <div key={cls.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition hover:shadow-md">
                   <div>
                     <h3 className="font-bold text-xl text-gray-800">{cls.name}</h3>
                     <p className="text-sm text-blue-600 font-medium mt-1 bg-blue-50 inline-block px-2 py-0.5 rounded">
                       {cls.students.length} Students enrolled
                     </p>
                   </div>
-                  <button 
-                    onClick={() => { setCurrentClass(cls); setView('class_details'); }}
-                    className="text-blue-600 bg-blue-50 px-5 py-3 rounded-xl font-bold hover:bg-blue-100 transition"
-                  >
-                    Manage Roster
-                  </button>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    {confirmDelete === cls.id ? (
+                      <div className="flex items-center gap-1 bg-red-50 p-1.5 rounded-xl border border-red-100 shrink-0">
+                        <span className="text-xs font-black text-red-600 px-2 uppercase tracking-wide">Delete?</span>
+                        <button onClick={() => { deleteClass(cls.id); setConfirmDelete(null); }} className="bg-red-500 text-white p-1.5 rounded-lg hover:bg-red-600 shadow-sm transition"><Icon name="CheckCircle" size={16} /></button>
+                        <button onClick={() => setConfirmDelete(null)} className="bg-gray-200 text-gray-700 p-1.5 rounded-lg hover:bg-gray-300 transition"><Icon name="XCircle" size={16} /></button>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => setConfirmDelete(cls.id)} 
+                        className="bg-red-50 text-red-600 p-3 rounded-xl hover:bg-red-100 transition flex items-center justify-center gap-2 font-semibold text-sm shrink-0" 
+                        title="Delete Class"
+                      >
+                        <Icon name="Trash" size={18} />
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => { setCurrentClass(cls); setView('class_details'); }}
+                      className="text-blue-600 bg-blue-50 px-5 py-3 rounded-xl font-bold hover:bg-blue-100 transition"
+                    >
+                      Manage Roster
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -1154,6 +1188,15 @@
       const formatRollNo = (val) => {
         const strVal = String(val).trim();
         return /^\d+$/.test(strVal) ? strVal.padStart(2, '0') : strVal;
+      };
+
+      const removeStudent = async (studentId) => {
+        const updatedClass = { 
+          ...currentClass, 
+          students: currentClass.students.filter(s => s.id !== studentId) 
+        };
+        await saveClass(updatedClass);
+        showToast("Student removed!");
       };
 
       const addSingle = async () => {
@@ -1246,6 +1289,15 @@
                         <td className="p-4 pl-6 text-gray-400 font-bold w-12 text-sm">{idx + 1}</td>
                         <td className="p-4 font-black font-mono text-gray-700 w-32 bg-gray-50/50 border-r border-gray-100">{student.rollNo}</td>
                         <td className="p-4 font-bold text-gray-800">{student.name}</td>
+                        <td className="p-4 text-right">
+                          <button 
+                            onClick={() => removeStudent(student.id)} 
+                            className="text-red-400 hover:text-red-600 transition p-2 bg-red-50 hover:bg-red-100 rounded-lg"
+                            title="Remove Student"
+                          >
+                            <Icon name="Trash" size={16} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
