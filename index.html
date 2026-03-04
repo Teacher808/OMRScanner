@@ -979,8 +979,8 @@
                 const imgD = ctx.getImageData(x, y, size, size);
                 return calculateDarkness(imgD.data);
             };
-
-            const cornerSize = Math.max(10, pw * 0.05); // Sample a 5% block in corners
+            // Sample a 5% block in corners
+            const cornerSize = Math.max(10, pw * 0.05); 
             const tl = getDarkness(px, py, cornerSize);
             const tr = getDarkness(px + pw - cornerSize, py, cornerSize);
             const bl = getDarkness(px, py + ph - cornerSize, cornerSize);
@@ -990,8 +990,8 @@
             if (tl > 60 && tr > 60 && bl > 60 && br > 60) {
                 alignmentFrames.current += 1;
                 setIsAligned(true);
-                // 120 frames at ~60fps equals a ~2-second hold time before auto capturing
-                if (alignmentFrames.current > 120) { 
+                // 5 frames at ~60fps equals near-instant capture once stabilized
+                if (alignmentFrames.current > 5) { 
                     processImage();
                     return; 
                 }
