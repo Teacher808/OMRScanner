@@ -990,8 +990,8 @@
             if (tl > 60 && tr > 60 && bl > 60 && br > 60) {
                 alignmentFrames.current += 1;
                 setIsAligned(true);
-                // Stay aligned for approx 15 frames (~0.25 seconds) to ensure stability before snapping
-                if (alignmentFrames.current > 15) { 
+                // 120 frames at ~60fps equals a ~2-second hold time before auto capturing
+                if (alignmentFrames.current > 120) { 
                     processImage();
                     return; 
                 }
