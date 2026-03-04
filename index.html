@@ -24,10 +24,10 @@
 
   <style>
     @media print {
-      @page { size: letter portrait; margin: 0; }
+      @page { size: letter portrait; margin: 0.25in; }
       body { margin: 0; padding: 0; background: #fff; }
       .print-hidden { display: none !important; }
-      .print-area { width: 100% !important; max-width: 100% !important; border: none !important; margin: 0 !important; box-shadow: none !important; }
+      .print-area { margin: 0 !important; box-shadow: none !important; border: none !important; }
     }
   </style>
 </head>
@@ -1431,10 +1431,23 @@
       const [customHeader, setCustomHeader] = useState("OFFICIAL OMR ANSWER SHEET");
       const [customInstructions, setCustomInstructions] = useState("INSTRUCTIONS: Completely fill in the circle corresponding to your answer. Do not use checkmarks or Xs.");
 
-      // Dynamic Resizing Logic based on Number of Questions to fit 1 page
+      // Calculate perfect pixel dimensions to force html2canvas and printing to identical scales
+      const PRINT_W = 816; // 8.5 inches at 96 DPI
+      const PRINT_H = 1056; // 11 inches at 96 DPI
+
+      // Calculate cell sizing dynamically for 816x1056 canvas
       const numCols = exam.questions <= 40 ? 2 : exam.questions <= 90 ? 3 : exam.questions <= 140 ? 4 : 5;
       const rowsPerCol = Math.ceil(exam.questions / numCols);
       const maxOptions = Math.max(...exam.answerKey.map(q => q.options), 1);
+
+      const rnColW = (PRINT_W * 0.35) / (exam.rollNoLength || 4);
+      const rnRowH = (PRINT_H * 0.20) / 10;
+      const rnBubbleSize = Math.floor(Math.min(rnColW * 0.7, rnRowH * 0.8));
+
+      const ansColW = (PRINT_W * 0.90) / numCols;
+      const ansRowH = (PRINT_H * 0.55) / rowsPerCol;
+      const cellW = (ansColW * 0.70) / maxOptions;
+      const ansBubbleSize = Math.floor(Math.min(cellW * 0.75, ansRowH * 0.8));
 
       const handlePrint = () => {
         window.print();
@@ -1444,7 +1457,13 @@
         if (!printAreaRef.current) return;
         setIsExporting(true);
         try {
-          const canvas = await html2canvas(printAreaRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+          const canvas = await html2canvas(printAreaRef.current, { 
+             scale: 2, 
+             useCORS: true, 
+             backgroundColor: '#ffffff',
+             width: PRINT_W,
+             height: PRINT_H 
+          });
           const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
           const link = document.createElement('a');
           link.download = `${exam.name.replace(/\s+/g, '_')}_OMR.jpg`;
@@ -1462,7 +1481,13 @@
         if (!printAreaRef.current) return;
         setIsExporting(true);
         try {
-          const canvas = await html2canvas(printAreaRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+          const canvas = await html2canvas(printAreaRef.current, { 
+             scale: 2, 
+             useCORS: true, 
+             backgroundColor: '#ffffff',
+             width: PRINT_W,
+             height: PRINT_H 
+          });
           const imgData = canvas.toDataURL('image/jpeg', 1.0);
           
           const { jsPDF } = window.jspdf;
@@ -1478,9 +1503,9 @@
       };
 
       return (
-        <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 mb-8 print:p-0 print:shadow-none print:border-none print:m-0">
+        <div className="bg-white p-4 sm:p-8 rounded-2xl shadow-sm border border-gray-100 mb-8 print:p-0 print:shadow-none print:border-none print:m-0 print:bg-transparent">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print-hidden">
-            <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-blue-600 transition bg-white p-2 rounded-full shadow-sm border border-gray-100 flex items-center gap-2 px-4 font-bold">
+            <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-blue-600 transition bg-gray-50 p-2 rounded-xl border border-gray-200 flex items-center gap-2 px-4 font-bold">
               <Icon name="ChevronLeft" size={20} /> Back
             </button>
             
@@ -1520,51 +1545,51 @@
              </div>
           </div>
 
-          {/* Absolute Absolute Positioning Print Wrapper - Strict Map to Optical Scanner zones */}
-          <div className="w-full flex justify-center">
+          {/* Wrapper to allow mobile scrolling while maintaining perfect 816x1056 aspect ratio for the Canvas to clone */}
+          <div className="w-full flex justify-center overflow-x-auto pb-4 custom-scrollbar bg-gray-100 print:bg-transparent rounded-xl print:rounded-none">
             <div 
               ref={printAreaRef} 
-              className="print-area relative bg-white border-[6px] border-black overflow-hidden shadow-sm" 
-              style={{ width: '100%', maxWidth: '800px', aspectRatio: '8.5/11', boxSizing: 'border-box' }}
+              className="print-area relative bg-white border-[6px] border-black shrink-0" 
+              style={{ width: `${PRINT_W}px`, height: `${PRINT_H}px`, boxSizing: 'border-box' }}
             >
               {/* Corner Registration Markers for manual checking if needed */}
-              <div className="absolute top-[2%] left-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-t-[6px] border-l-[6px] border-black"></div>
-              <div className="absolute top-[2%] right-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-t-[6px] border-r-[6px] border-black"></div>
-              <div className="absolute bottom-[2%] left-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-b-[6px] border-l-[6px] border-black"></div>
-              <div className="absolute bottom-[2%] right-[2%] w-[20px] h-[20px] sm:w-[30px] sm:h-[30px] border-b-[6px] border-r-[6px] border-black"></div>
+              <div className="absolute top-[2%] left-[2%] w-[30px] h-[30px] border-t-[6px] border-l-[6px] border-black"></div>
+              <div className="absolute top-[2%] right-[2%] w-[30px] h-[30px] border-t-[6px] border-r-[6px] border-black"></div>
+              <div className="absolute bottom-[2%] left-[2%] w-[30px] h-[30px] border-b-[6px] border-l-[6px] border-black"></div>
+              <div className="absolute bottom-[2%] right-[2%] w-[30px] h-[30px] border-b-[6px] border-r-[6px] border-black"></div>
 
               {/* Title Section */}
               <div className="absolute w-full text-center" style={{ top: '3%', left: '0', height: '6%' }}>
-                <h1 className="text-xl sm:text-3xl font-black uppercase tracking-widest text-black">{customHeader || " "}</h1>
+                <h1 className="font-black uppercase tracking-widest text-black" style={{ fontSize: '32px' }}>{customHeader || " "}</h1>
               </div>
 
               {/* Information Section (Map: Top 15% to 35%, Left 5% to 50%) */}
-              <div className="absolute border-[3px] border-black p-2 sm:p-4 flex flex-col justify-between" style={{ top: '15%', left: '5%', width: '45%', height: '20%' }}>
-                <div className="border-b border-gray-300 pb-1 mb-1 sm:mb-2">
-                  <p className="font-black text-sm sm:text-lg uppercase tracking-widest text-black line-clamp-1">{exam.name}</p>
+              <div className="absolute border-[3px] border-black p-4 flex flex-col justify-between" style={{ top: '15%', left: '5%', width: '45%', height: '20%' }}>
+                <div className="border-b border-gray-300 pb-2 mb-2">
+                  <p className="font-black uppercase tracking-widest text-black line-clamp-1" style={{ fontSize: '24px' }}>{exam.name}</p>
                 </div>
-                <div className="flex flex-col gap-1 sm:gap-2">
+                <div className="flex flex-col gap-2">
                   <div className="flex items-end gap-2 w-full">
-                    <p className="font-bold text-[10px] sm:text-sm">NAME:</p>
-                    <div className="border-b-[2px] border-black flex-1 h-3 sm:h-4"></div>
+                    <p className="font-bold text-black" style={{ fontSize: '16px' }}>NAME:</p>
+                    <div className="border-b-[2px] border-black flex-1 h-5"></div>
                   </div>
                   <div className="flex items-end gap-2 w-full">
-                    <p className="font-bold text-[10px] sm:text-sm">CLASS:</p>
-                    <span className="flex-1 font-normal border-b-[2px] border-black text-[10px] sm:text-sm whitespace-nowrap overflow-hidden">{exam.className || ''}</span>
+                    <p className="font-bold text-black" style={{ fontSize: '16px' }}>CLASS:</p>
+                    <span className="flex-1 font-normal border-b-[2px] border-black whitespace-nowrap overflow-hidden text-black" style={{ fontSize: '16px' }}>{exam.className || ''}</span>
                   </div>
                 </div>
                 <div className="flex justify-between items-end mt-auto gap-4">
                   <div className="flex items-end gap-2 flex-1">
-                    <p className="font-bold text-[10px] sm:text-sm">DATE:</p>
-                    <div className="flex-1 border-b-[2px] border-black h-3 sm:h-4"></div>
+                    <p className="font-bold text-black" style={{ fontSize: '16px' }}>DATE:</p>
+                    <div className="flex-1 border-b-[2px] border-black h-5"></div>
                   </div>
-                  <p className="font-bold text-[10px] sm:text-sm whitespace-nowrap">SCORE: ____ / {exam.questions}</p>
+                  <p className="font-bold text-black whitespace-nowrap" style={{ fontSize: '16px' }}>SCORE: ____ / {exam.questions}</p>
                 </div>
               </div>
 
               {/* Roll No Text Box Area (Top 9%, Left 55%, Width 35%, Height 6%) */}
-              <div className="absolute border-l-[3px] border-r-[3px] border-t-[3px] border-black bg-gray-50/30 px-1 sm:px-2 pt-1 flex flex-col items-center" style={{ top: '9%', left: '55%', width: '35%', height: '6%' }}>
-                 <p className="font-black text-[8px] sm:text-xs uppercase tracking-widest text-black flex-1 flex items-center">Roll No.</p>
+              <div className="absolute border-l-[3px] border-r-[3px] border-t-[3px] border-black bg-gray-50/30 px-2 pt-1 flex flex-col items-center" style={{ top: '9%', left: '55%', width: '35%', height: '6%' }}>
+                 <p className="font-black uppercase tracking-widest text-black flex-1 flex items-center" style={{ fontSize: '14px' }}>Roll No.</p>
                  <div className="flex w-full pb-1 h-[60%]">
                    {Array.from({length: exam.rollNoLength || 4}).map((_, i) => (
                       <div key={i} className="flex-1 flex justify-center items-center h-full border-r last:border-0 border-transparent">
@@ -1580,8 +1605,13 @@
                     <div key={c} className="flex-1 flex flex-col h-full border-r last:border-0 border-black/30">
                        {Array.from({length: 10}).map((_, r) => (
                          <div key={r} className="flex-1 w-full flex items-center justify-center">
-                            <div className="rounded-full border-[1px] sm:border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black"
-                                 style={{ height: '75%', maxWidth: '75%', aspectRatio: '1/1', fontSize: 'min(1.5vw, 10px)' }}>
+                            <div className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black"
+                                 style={{ 
+                                   width: `${rnBubbleSize}px`, 
+                                   height: `${rnBubbleSize}px`, 
+                                   fontSize: `${rnBubbleSize * 0.6}px`, 
+                                   lineHeight: 1 
+                                 }}>
                               {r}
                             </div>
                          </div>
@@ -1592,7 +1622,7 @@
 
               {/* Answers Title (Top 36%, Left 5%, Width 90%) */}
               <div className="absolute flex items-end pb-1 border-b-[2px] border-black" style={{ top: '35%', left: '5%', width: '90%', height: '4%' }}>
-                <p className="font-bold text-[8px] sm:text-[11px] text-black tracking-wide">
+                <p className="font-bold text-black tracking-wide" style={{ fontSize: '12px' }}>
                   {customInstructions}
                 </p>
               </div>
@@ -1607,8 +1637,8 @@
                           const qData = exam.answerKey[qIdx];
                           return (
                              <div key={qIdx} className="absolute w-full flex items-center" style={{ top: `${(100 / rowsPerCol) * rIdx}%`, height: `${100 / rowsPerCol}%` }}>
-                                <div className="flex items-center justify-end pr-1 sm:pr-2" style={{ width: '30%', height: '100%' }}>
-                                   <span className="font-bold text-black" style={{ fontSize: 'min(1.5vw, 12px)' }}>{qIdx + 1}.</span>
+                                <div className="flex items-center justify-end pr-2" style={{ width: '30%', height: '100%' }}>
+                                   <span className="font-bold text-black" style={{ fontSize: `${Math.max(12, ansBubbleSize * 0.7)}px` }}>{qIdx + 1}.</span>
                                 </div>
                                 <div className="flex items-center" style={{ width: '70%', height: '100%' }}>
                                    {Array.from({length: maxOptions}).map((_, oIdx) => {
@@ -1616,12 +1646,12 @@
                                       const label = qData.type === 'true_false' ? (oIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + oIdx);
                                       return (
                                          <div key={oIdx} className="flex justify-center items-center h-full" style={{ width: `${100 / maxOptions}%` }}>
-                                            <div className="rounded-full border-[1px] sm:border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black"
+                                            <div className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black"
                                                  style={{
-                                                    height: '75%',
-                                                    maxWidth: '75%',
-                                                    aspectRatio: '1/1',
-                                                    fontSize: 'min(1.2vw, 10px)'
+                                                    width: `${ansBubbleSize}px`,
+                                                    height: `${ansBubbleSize}px`,
+                                                    fontSize: `${ansBubbleSize * 0.55}px`,
+                                                    lineHeight: 1
                                                  }}>
                                               {label}
                                             </div>
