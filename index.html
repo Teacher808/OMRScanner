@@ -1,1848 +1,1065 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EasyOMR App</title>
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Camera, FileText, Plus, Settings, ChevronLeft, 
+  CheckCircle, XCircle, List, User, Save, Trash2, 
+  RefreshCw, AlertCircle, Edit3, Image as ImageIcon, Printer,
+  Layers, Play
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, onSnapshot, addDoc, deleteDoc } from 'firebase/firestore';
 
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+// --- Firebase Initialization ---
+const firebaseConfig = {
+  apiKey: "AIzaSyAvPRZ2CfVD7V56WNcPsFLN386a2tkBM9k",
+  authDomain: "examscanner01.firebaseapp.com",
+  projectId: "examscanner01",
+  storageBucket: "examscanner01.firebasestorage.app",
+  messagingSenderId: "314934243336",
+  appId: "1:314934243336:web:ec65948994453f5906a1bd"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'evalbee-clone-app';
 
-  <!-- FontAwesome for Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+// --- UI Components ---
+const Button = ({ onClick, children, variant = 'primary', className = '', icon: Icon, disabled }) => {
+  const baseStyle = "flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none";
+  const variants = {
+    primary: "bg-blue-600 text-white hover:bg-blue-700 shadow-md",
+    secondary: "bg-gray-100 text-gray-700 hover:bg-gray-200",
+    danger: "bg-red-50 text-red-600 hover:bg-red-100",
+    outline: "border-2 border-blue-600 text-blue-600 hover:bg-blue-50"
+  };
+  return (
+    <button onClick={onClick} className={`${baseStyle} ${variants[variant]} ${className}`} disabled={disabled}>
+      {Icon && <Icon size={18} />}
+      {children}
+    </button>
+  );
+};
 
-  <!-- React & ReactDOM -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+// --- Shared Helpers ---
+export const getQuestionConfigs = (exam) => {
+  if (!exam) return [];
+  let configs = [];
+  let qNum = 1;
+  const alphabet = ['A','B','C','D','E','F','G','H','I','J'];
 
-  <!-- Babel Standalone for in-browser JSX compiling -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- HTML2Canvas & jsPDF for exporting OMR Sheets -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-  <style>
-    @media print {
-      @page { size: letter portrait; margin: 0; }
-      body { margin: 0; padding: 0; background: #fff; display: flex; justify-content: center; }
-      .print-hidden { display: none !important; }
-      .print-area { 
-        margin: 0 !important; 
-        box-shadow: none !important; 
-        border: none !important; 
-        transform: scale(1) !important; 
-        width: 8.5in !important; 
-        height: 11in !important; 
-        page-break-after: avoid;
-        page-break-inside: avoid;
+  if (exam.sections && exam.sections.length > 0) {
+    exam.sections.forEach(sec => {
+      let labels = sec.type === 'tf' ? ['T', 'F'] : alphabet.slice(0, sec.options);
+      for (let i = 0; i < sec.questions; i++) {
+        configs.push({ qNum: qNum++, labels, sectionId: sec.id, type: sec.type });
       }
+    });
+  } else {
+    // Legacy fallback for older exams
+    let labels = alphabet.slice(0, exam.optionsPerQuestion || 4);
+    let numQs = exam.numQuestions || 0;
+    for (let i = 0; i < numQs; i++) {
+      configs.push({ qNum: qNum++, labels, sectionId: 'default', type: 'mcq' });
     }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
+  }
+  return configs;
+};
 
-  <!-- Note the data-type="module" which allows modern import statements -->
-  <script type="text/babel" data-type="module">
-    const { useState, useEffect, useRef } = React;
+// --- Main Application ---
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+  const [view, setView] = useState('dashboard'); // dashboard, create, exam-detail, scanner, review, print
+  
+  // Local Demo Mode State (Bypasses Firebase if Auth Fails)
+  const [isLocalMode, setIsLocalMode] = useState(false);
+  const [localExams, setLocalExams] = useState([]);
+  const [localKeys, setLocalKeys] = useState({});
+  const [localResults, setLocalResults] = useState({});
 
-    // --- FIREBASE IMPORTS ---
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, onAuthStateChanged, signInWithCustomToken, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+  // App Data State
+  const [exams, setExams] = useState([]);
+  const [currentExam, setCurrentExam] = useState(null);
+  const [answerKeys, setAnswerKeys] = useState({});
+  const [results, setResults] = useState([]);
 
-    // --- FIREBASE SETUP ---
-    let firebaseConfig = {};
-    if (typeof __firebase_config !== 'undefined') {
-      firebaseConfig = JSON.parse(__firebase_config);
-    } else {
-      // REPLACE THIS WITH YOUR OWN FIREBASE CONFIG IF HOSTING EXTERNALLY
-      firebaseConfig = {
-        apiKey: "AIzaSyAUAqxd3hdWp0BRoG4nFTZCamry7io7k-E",
-        authDomain: "examscanner-e90dd.firebaseapp.com",
-        projectId: "examscanner-e90dd",
-        storageBucket: "examscanner-e90dd.firebasestorage.app",
-        messagingSenderId: "13021828091",
-        appId: "1:13021828091:web:2c8b947cd823a4befbf15e"
-      };
-    }
-    
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'easyomr-app';
-    let app, auth, db;
-    let firebaseInitError = null;
-    try {
-      app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
-      db = getFirestore(app);
-    } catch (e) {
-      console.error("Firebase init failed:", e);
-      firebaseInitError = e.message;
-    }
-
-    // --- ICON COMPONENT MAPPER ---
-    function Icon({ name, size = 20, className = "" }) {
-      const map = {
-        Camera: 'fa-camera', Plus: 'fa-plus', Save: 'fa-save', Settings: 'fa-cog', 
-        LogOut: 'fa-sign-out-alt', CheckCircle: 'fa-check-circle', XCircle: 'fa-times-circle', 
-        List: 'fa-list', FileText: 'fa-file-alt', Users: 'fa-users', Printer: 'fa-print', 
-        UserPlus: 'fa-user-plus', Upload: 'fa-upload', ChevronLeft: 'fa-chevron-left', 
-        BarChart2: 'fa-chart-bar', CloudUpload: 'fa-cloud-upload-alt', Trash: 'fa-trash',
-        Edit: 'fa-edit', UserCheck: 'fa-user-check', Image: 'fa-image', FilePdf: 'fa-file-pdf', Download: 'fa-download'
-      };
-      return <i className={`fas ${map[name]} ${className}`} style={{ fontSize: size }}></i>;
-    }
-
-    // --- CUSTOM TOAST NOTIFICATION ---
-    function Toast({ message, onClose }) {
-      useEffect(() => {
-        if (message) {
-          const timer = setTimeout(onClose, 3000);
-          return () => clearTimeout(timer);
-        }
-      }, [message]);
-
-      if (!message) return null;
-      return (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-50 flex items-center gap-2 animate-bounce z-50">
-          <Icon name="CheckCircle" size={16} className="text-green-400" />
-          <span className="font-medium text-sm">{message}</span>
-        </div>
-      );
-    }
-
-    // --- AUTHENTICATION SCREEN ---
-    function AuthScreen({ auth }) {
-      const [isLogin, setIsLogin] = useState(true);
-      const [email, setEmail] = useState('');
-      const [password, setPassword] = useState('');
-      const [error, setError] = useState('');
-      const [loading, setLoading] = useState(false);
-
-      const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
-        try {
-          if (isLogin) {
-            await signInWithEmailAndPassword(auth, email, password);
-          } else {
-            await createUserWithEmailAndPassword(auth, email, password);
-          }
-        } catch (err) {
-          setError(err.message.replace('Firebase: ', ''));
+  // --- Auth Setup ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (err) {
+        // Silently catch to prevent the Canvas overlay error
+        setIsLocalMode(true);
+        if (err.code === 'auth/admin-restricted-operation') {
+           setAuthError("API Key restricted. Enable 'Identity Toolkit API' in Google Cloud to sync with Firebase.");
+        } else {
+           setAuthError(err.message);
         }
         setLoading(false);
-      };
+      }
+    };
+    initAuth();
 
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-          <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
-            <div className="text-center mb-8">
-              <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-                <Icon name="Camera" size={32} className="text-white" />
-              </div>
-              <h1 className="text-2xl font-black text-gray-800">EasyOMR</h1>
-              <p className="text-gray-500 text-sm mt-1">Sign in to access your secure exams</p>
-            </div>
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        setAuthError('');
+      }
+      setLoading(false);
+    }, (error) => {
+      setIsLocalMode(true);
+      setAuthError(error.message);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm border border-red-200">{error}</div>}
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Email Address</label>
-                <input 
-                  type="email" required value={email} onChange={e => setEmail(e.target.value)}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
-                  placeholder="you@school.edu"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Password</label>
-                <input 
-                  type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
-                  placeholder="••••••••"
-                />
-              </div>
-              <button 
-                type="submit" disabled={loading}
-                className="w-full bg-blue-600 text-white p-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-md disabled:opacity-70"
-              >
-                {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Create Account')}
-              </button>
-            </form>
+  // --- Data Fetching ---
+  useEffect(() => {
+    if (isLocalMode) {
+      setExams(localExams.sort((a, b) => b.createdAt - a.createdAt));
+      return;
+    }
+    
+    if (!user) return;
 
-            <div className="mt-6 text-center">
-              <button onClick={() => setIsLogin(!isLogin)} className="text-sm text-blue-600 hover:underline font-medium">
-                {isLogin ? "Need an account? Register here" : "Already have an account? Sign in"}
-              </button>
-            </div>
+    try {
+      const examsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'exams');
+      const unsubscribeExams = onSnapshot(examsRef, (snapshot) => {
+        const examsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setExams(examsData.sort((a, b) => b.createdAt - a.createdAt));
+      }, (error) => {
+        // Silent catch
+      });
 
-            <div className="mt-8 text-center text-xs text-gray-400 font-medium">
-              Developed by PVNJ
-            </div>
-          </div>
-        </div>
-      );
+      return () => unsubscribeExams();
+    } catch (e) {
+      setIsLocalMode(true);
+    }
+  }, [user, isLocalMode, localExams]);
+
+  // Fetch specific exam data when selected
+  useEffect(() => {
+    if (isLocalMode) {
+      if (currentExam) {
+        setAnswerKeys(localKeys[currentExam.id] || {});
+        setResults(localResults[currentExam.id] || []);
+      }
+      return;
     }
 
-    // --- MAIN APP COMPONENT ---
-    function App() {
-      const [user, setUser] = useState(null);
-      const [isAuthChecking, setIsAuthChecking] = useState(true);
-      const [initError, setInitError] = useState('');
-      const [view, setView] = useState('dashboard');
-      
-      // Data State
-      const [exams, setExams] = useState([]);
-      const [currentExam, setCurrentExam] = useState(null);
-      const [classes, setClasses] = useState([]);
-      const [currentClass, setCurrentClass] = useState(null);
-      const [toastMsg, setToastMsg] = useState('');
+    if (!user || !currentExam) return;
 
-      const showToast = (msg) => setToastMsg(msg);
+    try {
+      const keyRef = collection(db, 'artifacts', appId, 'users', user.uid, `exams/${currentExam.id}/key`);
+      const unsubscribeKey = onSnapshot(keyRef, (snapshot) => {
+        const keyData = {};
+        snapshot.docs.forEach(doc => { keyData[doc.id] = doc.data().answer; });
+        setAnswerKeys(keyData);
+      });
 
-      // Auth Listener
-      useEffect(() => {
-        if (!auth) {
-          setInitError(firebaseInitError || "Could not connect to Firebase database.");
-          setIsAuthChecking(false);
-          return;
-        }
-        const initAuth = async () => {
-          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            await signInWithCustomToken(auth, __initial_auth_token).catch(console.error);
-          }
-        };
-        initAuth();
-        const unsubscribe = onAuthStateChanged(auth, (u) => {
-          setUser(u);
-          setIsAuthChecking(false);
-        });
-        return () => unsubscribe();
-      }, []);
+      const resultsRef = collection(db, 'artifacts', appId, 'users', user.uid, `exams/${currentExam.id}/results`);
+      const unsubscribeResults = onSnapshot(resultsRef, (snapshot) => {
+        const resData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setResults(resData.sort((a, b) => b.timestamp - a.timestamp));
+      });
 
-      // Realtime Cloud Data Syncing (Firestore)
-      useEffect(() => {
-        if (!user || !db) return;
-        
-        const examsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'exams');
-        const classesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'classes');
-
-        const unsubExams = onSnapshot(examsRef, (snap) => {
-          const data = snap.docs.map(d => d.data());
-          data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-          setExams(data);
-          if (currentExam) {
-             const updated = data.find(e => e.id === currentExam.id);
-             if (updated) setCurrentExam(updated);
-          }
-        }, console.error);
-
-        const unsubClasses = onSnapshot(classesRef, (snap) => {
-          const data = snap.docs.map(d => d.data());
-          setClasses(data);
-          if (currentClass) {
-             const updated = data.find(c => c.id === currentClass.id);
-             if (updated) setCurrentClass(updated);
-          }
-        }, console.error);
-
-        return () => { unsubExams(); unsubClasses(); };
-      }, [user]);
-
-      // Database Helpers
-      const saveExam = async (examObj) => {
-        if (!user || !db) return;
-        try {
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'exams', examObj.id), examObj);
-        } catch (e) { console.error("Error saving exam", e); showToast("Error saving data"); }
+      return () => {
+        unsubscribeKey();
+        unsubscribeResults();
       };
+    } catch (e) {
+      // Silent catch
+    }
+  }, [user, currentExam, isLocalMode, localKeys, localResults]);
 
-      const deleteExam = async (examId) => {
-        if (!user || !db) return;
-        try {
-          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'exams', examId));
-          showToast("Exam deleted successfully");
-        } catch (e) {
-          console.error("Error deleting exam", e);
-          showToast("Error deleting exam");
-        }
-      };
+  // --- Handlers (Support both Firebase and Local Mode) ---
+  const navigate = (newView, exam) => {
+    if (exam !== undefined) setCurrentExam(exam);
+    setView(newView);
+  };
 
-      const saveClass = async (classObj) => {
-        if (!user || !db) return;
-        try {
-          await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'classes', classObj.id), classObj);
-        } catch (e) { console.error("Error saving class", e); showToast("Error saving class"); }
-      };
+  const handleCreateExam = async (newExam) => {
+    if (isLocalMode) {
+      const id = Date.now().toString();
+      const savedExam = { id, ...newExam };
+      setLocalExams(prev => [savedExam, ...prev]);
+      return savedExam;
+    }
+    if (!user) throw new Error("Not authenticated");
+    const docRef = await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'exams'), newExam);
+    return { id: docRef.id, ...newExam };
+  };
 
-      const deleteClass = async (classId) => {
-        if (!user || !db) return;
-        try {
-          await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'classes', classId));
-          showToast("Class deleted successfully");
-          if (currentClass && currentClass.id === classId) {
-            setCurrentClass(null);
-            setView('classes');
-          }
-        } catch (e) {
-          console.error("Error deleting class", e);
-          showToast("Error deleting class");
-        }
-      };
+  const deleteExam = async (examId) => {
+    if (isLocalMode) {
+      setLocalExams(prev => prev.filter(e => e.id !== examId));
+      if (currentExam?.id === examId) navigate('dashboard');
+      return;
+    }
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'exams', examId));
+      if (currentExam?.id === examId) navigate('dashboard');
+    } catch (err) {
+      // Silent catch
+    }
+  };
 
-      const handleLogout = () => {
-        if (auth) signOut(auth);
-      };
+  const handleSaveKey = async (examId, qNum, optionIndex) => {
+    if (isLocalMode) {
+      setLocalKeys(prev => ({
+        ...prev,
+        [examId]: { ...(prev[examId] || {}), [qNum]: optionIndex }
+      }));
+      return;
+    }
+    if (!user) return;
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'users', user.uid, `exams/${examId}/key`, qNum.toString());
+      await setDoc(docRef, { answer: optionIndex });
+    } catch (err) {
+      // Silent catch
+    }
+  };
 
-      if (isAuthChecking) {
-        return (
-          <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100">
-            <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <p className="text-gray-500 font-bold">Connecting to Cloud Database...</p>
-          </div>
-        );
-      }
+  const handleSaveResult = async (examId, resultData) => {
+    if (isLocalMode) {
+      setLocalResults(prev => ({
+        ...prev,
+        [examId]: [{ id: Date.now().toString(), ...resultData }, ...(prev[examId] || [])]
+      }));
+      return;
+    }
+    if (!user) return;
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, `exams/${examId}/results`), resultData);
+    } catch (err) {
+      // Silent catch
+    }
+  };
 
-      if (initError) {
-        return (
-          <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-            <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border border-red-100">
-              <Icon name="XCircle" size={48} className="text-red-500 mb-4 mx-auto" />
-              <h2 className="text-xl font-black text-gray-800 mb-2">Connection Error</h2>
-              <p className="text-sm text-gray-600 mb-6 bg-red-50 p-3 rounded-lg border border-red-100">{initError}</p>
-            </div>
-          </div>
-        );
-      }
+  // --- Renderers ---
+  if (loading && !isLocalMode) {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50"><RefreshCw className="animate-spin text-blue-600" size={32} /></div>;
+  }
 
-      if (!user) {
-        return <AuthScreen auth={auth} />;
-      }
+  // Hide main app wrapper if printing
+  if (view === 'print') {
+    return <PrintTemplate exam={currentExam} onNavigate={navigate} />;
+  }
 
-      return (
-        <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 print:bg-white print:pb-0 print:min-h-0">
-          <Toast message={toastMsg} onClose={() => setToastMsg('')} />
-          
-          <header className="print-hidden bg-blue-600 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center">
-            <h1 className="text-xl font-bold flex items-center gap-2">
-              <Icon name="Camera" size={24} /> EasyOMR
+  return (
+    <div className="min-h-screen bg-gray-100 font-sans text-gray-800 pb-20">
+      {/* Header */}
+      <header className={`text-white shadow-md sticky top-0 z-10 ${isLocalMode ? 'bg-orange-600' : 'bg-blue-600'}`}>
+        <div className="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {view !== 'dashboard' && (
+              <button onClick={() => navigate(view === 'create' || view === 'exam-detail' ? 'dashboard' : 'exam-detail')} className={`p-1 rounded-full transition-colors ${isLocalMode ? 'hover:bg-orange-700' : 'hover:bg-blue-700'}`}>
+                <ChevronLeft size={24} />
+              </button>
+            )}
+            <h1 className="text-xl font-bold tracking-wide flex flex-col">
+              {view === 'dashboard' ? 'OMR Scanner' : 
+               view === 'create' ? 'New Exam' : 
+               view === 'scanner' ? 'Scan Sheet' :
+               currentExam?.title || 'Exam Details'}
+              {isLocalMode && <span className="text-[10px] uppercase tracking-widest font-semibold bg-white text-orange-600 px-2 py-0.5 rounded-full inline-block mt-0.5 w-max">Demo Mode (Offline)</span>}
             </h1>
-            <div className="flex gap-3">
-              <button onClick={() => setView('settings')} className="p-1 hover:bg-blue-700 rounded transition">
-                <Icon name="Settings" size={20} />
-              </button>
-              <button onClick={handleLogout} className="p-1 hover:bg-blue-700 rounded transition">
-                <Icon name="LogOut" size={20} />
-              </button>
-            </div>
-          </header>
-
-          <main className="p-4 max-w-2xl mx-auto print:max-w-none print:p-0 print:m-0">
-            {view === 'dashboard' && (
-              <Dashboard 
-                exams={exams} 
-                setView={setView} 
-                setCurrentExam={setCurrentExam} 
-                deleteExam={deleteExam}
-              />
-            )}
-            {view === 'create_exam' && (
-              <CreateExam 
-                saveExam={saveExam} 
-                setView={setView} 
-                classes={classes}
-                showToast={showToast}
-                examToEdit={currentExam}
-              />
-            )}
-            {view === 'analysis' && currentExam && (
-              <ItemAnalysis 
-                exam={currentExam} 
-                setView={setView} 
-              />
-            )}
-            {view === 'scanner' && currentExam && (
-              <Scanner 
-                exam={currentExam} 
-                classes={classes}
-                setView={setView} 
-                saveExam={saveExam}
-                setCurrentExam={setCurrentExam}
-                showToast={showToast}
-              />
-            )}
-            {view === 'settings' && (
-              <SettingsPanel 
-                user={user}
-              />
-            )}
-            {view === 'classes' && (
-              <ClassesManager 
-                classes={classes} 
-                saveClass={saveClass}
-                setView={setView} 
-                setCurrentClass={setCurrentClass} 
-                deleteClass={deleteClass}
-              />
-            )}
-            {view === 'class_details' && currentClass && (
-              <ClassDetails 
-                currentClass={currentClass} 
-                saveClass={saveClass}
-                setView={setView} 
-                showToast={showToast}
-              />
-            )}
-            {view === 'omr_sheet' && currentExam && (
-              <OMRSheetTemplate 
-                exam={currentExam} 
-                setView={setView} 
-                showToast={showToast}
-              />
-            )}
-
-            <div className="print-hidden mt-12 text-center text-xs text-gray-400 font-medium">
-              Developed by PVNJ
-            </div>
-          </main>
-
-          <nav className="print-hidden fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around p-3 pb-safe z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
-            <button onClick={() => setView('dashboard')} className={`flex flex-col items-center p-2 ${view === 'dashboard' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600 transition'}`}>
-              <Icon name="List" size={24} />
-              <span className="text-xs mt-1 font-semibold">Exams</span>
-            </button>
-            <button onClick={() => setView('classes')} className={`flex flex-col items-center p-2 ${view === 'classes' || view === 'class_details' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600 transition'}`}>
-              <Icon name="Users" size={24} />
-              <span className="text-xs mt-1 font-semibold">Classes</span>
-            </button>
-            <button onClick={() => { setCurrentExam(null); setView('create_exam'); }} className={`flex flex-col items-center p-2 ${view === 'create_exam' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600 transition'}`}>
-              <Icon name="Plus" size={24} />
-              <span className="text-xs mt-1 font-semibold">New Exam</span>
-            </button>
-          </nav>
+          </div>
+          {view === 'dashboard' && <div className={`${isLocalMode ? 'bg-orange-500' : 'bg-blue-500'} p-2 rounded-full`}><Camera size={20} /></div>}
         </div>
-      );
-    }
+      </header>
+      
+      {/* Error Banner */}
+      {authError && isLocalMode && (
+        <div className="bg-orange-50 border-b border-orange-200 p-3 flex items-start gap-2 text-sm text-orange-800 animate-in slide-in-from-top-2">
+          <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="font-semibold">Cloud Sync Disabled</p>
+            <p className="text-xs mt-0.5">{authError}</p>
+          </div>
+          <button onClick={() => setAuthError('')} className="text-orange-500 hover:text-orange-700">
+            <XCircle size={16} />
+          </button>
+        </div>
+      )}
 
-    // --- DASHBOARD COMPONENT ---
-    function Dashboard({ exams, setView, setCurrentExam, deleteExam }) {
-      const [confirmDelete, setConfirmDelete] = useState(null);
+      {/* Main Content Area */}
+      <main className="max-w-md mx-auto relative min-h-[calc(100vh-64px)]">
+        {view === 'dashboard' && <Dashboard exams={exams} onNavigate={navigate} />}
+        {view === 'create' && <CreateExam onSave={handleCreateExam} onNavigate={navigate} />}
+        {view === 'exam-detail' && <ExamDetail exam={currentExam} keys={answerKeys} results={results} onNavigate={navigate} onSaveKey={handleSaveKey} onDelete={() => deleteExam(currentExam.id)} />}
+        {view === 'scanner' && <Scanner exam={currentExam} onNavigate={navigate} />}
+        {view === 'review' && <ReviewScan exam={currentExam} answerKeys={answerKeys} onSaveResult={handleSaveResult} onNavigate={navigate} />}
+      </main>
+    </div>
+  );
+}
 
-      if (exams.length === 0) {
-        return (
-          <div className="text-center mt-20 bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-            <Icon name="FileText" size={64} className="mx-auto text-blue-200 mb-4" />
-            <h2 className="text-xl font-bold text-gray-800 mb-2">No Exams Yet</h2>
-            <p className="text-gray-500 mb-6 text-sm">Create your first exam and print out bubble sheets for your students.</p>
-            <button 
-              onClick={() => { setCurrentExam(null); setView('create_exam'); }}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-blue-700 transition flex items-center gap-2 mx-auto font-bold"
+// --- View: Dashboard ---
+function Dashboard({ exams, onNavigate }) {
+  return (
+    <div className="p-4 flex flex-col gap-4">
+      <div className="flex justify-between items-center mb-2">
+        <h2 className="text-lg font-semibold text-gray-700">Recent Exams</h2>
+        <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-medium">{exams.length} Total</span>
+      </div>
+
+      {exams.length === 0 ? (
+        <div className="text-center py-12 px-4 bg-white rounded-xl shadow-sm border border-gray-100">
+          <FileText className="mx-auto text-gray-300 mb-3" size={48} />
+          <p className="text-gray-500">No exams created yet.</p>
+          <p className="text-sm text-gray-400 mb-4">Create your first exam template to start scanning.</p>
+          <Button onClick={() => onNavigate('create')} icon={Plus}>Create Exam</Button>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {exams.map(exam => (
+            <div 
+              key={exam.id} 
+              onClick={() => onNavigate('exam-detail', exam)}
+              className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center active:bg-gray-50 transition-colors cursor-pointer"
             >
-              <Icon name="Plus" size={20} /> Create Exam
-            </button>
-          </div>
-        );
-      }
-
-      return (
-        <div className="space-y-4">
-          <div className="flex justify-between items-end mb-4">
-            <h2 className="text-2xl font-black text-gray-800">Your Exams</h2>
-            <span className="text-xs font-bold bg-green-100 text-green-700 px-3 py-1 rounded-full uppercase tracking-wider">
-              <Icon name="CloudUpload" size={12} className="mr-1" /> Cloud Synced
-            </span>
-          </div>
-          
-          {exams.map((exam, idx) => {
-            const types = [...new Set(exam.answerKey.map(k => k.type))];
-            const typeLabel = types.length > 1 ? 'Mixed Types' : (types[0] === 'true_false' ? 'True/False' : 'Multiple Choice');
-            const scanCount = exam.results ? exam.results.length : 0;
-
-            return (
-              <div key={exam.id || idx} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <h3 className="font-bold text-xl text-gray-800">{exam.name}</h3>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap text-sm text-gray-500">
-                    <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-700 font-medium">{exam.questions} Items</span>
-                    <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-700">{typeLabel}</span>
-                    {exam.className && <span className="text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">Class: {exam.className}</span>}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-2 font-medium uppercase tracking-wider">
-                     {scanCount} Scans Recorded
-                  </p>
-                </div>
-                
-                <div className="flex gap-2 w-full md:w-auto mt-2 md:mt-0 pt-3 md:pt-0 border-t border-gray-100 md:border-0 justify-between md:justify-end">
-                  <div className="flex gap-2 overflow-x-auto custom-scrollbar pr-1 pb-1 md:pb-0">
-                    {confirmDelete === exam.id ? (
-                      <div className="flex items-center gap-1 bg-red-50 p-1.5 rounded-xl border border-red-100 shrink-0">
-                        <span className="text-xs font-black text-red-600 px-2 uppercase tracking-wide">Delete?</span>
-                        <button onClick={() => { deleteExam(exam.id); setConfirmDelete(null); }} className="bg-red-500 text-white p-1.5 rounded-lg hover:bg-red-600 shadow-sm transition"><Icon name="CheckCircle" size={16} /></button>
-                        <button onClick={() => setConfirmDelete(null)} className="bg-gray-200 text-gray-700 p-1.5 rounded-lg hover:bg-gray-300 transition"><Icon name="XCircle" size={16} /></button>
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={() => setConfirmDelete(exam.id)} 
-                        className="bg-red-50 text-red-600 p-3 rounded-xl hover:bg-red-100 transition flex items-center justify-center gap-2 font-semibold text-sm shrink-0" 
-                        title="Delete Exam"
-                      >
-                        <Icon name="Trash" size={18} />
-                      </button>
-                    )}
-                    
-                    <button 
-                      onClick={() => { setCurrentExam(exam); setView('create_exam'); }}
-                      className="bg-blue-50 text-blue-600 p-3 rounded-xl hover:bg-blue-100 transition flex items-center gap-2 font-semibold text-sm shrink-0"
-                      title="Edit Exam"
-                    >
-                      <Icon name="Edit" size={18} /> <span className="md:hidden">Edit</span>
-                    </button>
-                    <button 
-                      onClick={() => { setCurrentExam(exam); setView('analysis'); }}
-                      className="bg-purple-50 text-purple-600 p-3 rounded-xl hover:bg-purple-100 transition flex items-center gap-2 font-semibold text-sm shrink-0"
-                      title="Item Analysis"
-                    >
-                      <Icon name="BarChart2" size={18} /> <span className="md:hidden">Stats</span>
-                    </button>
-                    <button 
-                      onClick={() => { setCurrentExam(exam); setView('omr_sheet'); }}
-                      className="bg-gray-100 text-gray-700 p-3 rounded-xl hover:bg-gray-200 transition flex items-center gap-2 font-semibold text-sm shrink-0"
-                      title="Print OMR Sheet"
-                    >
-                      <Icon name="Printer" size={18} /> <span className="md:hidden">Print</span>
-                    </button>
-                  </div>
-                  <button 
-                    onClick={() => { setCurrentExam(exam); setView('scanner'); }}
-                    className="bg-green-500 text-white px-5 py-3 rounded-xl shadow-md hover:bg-green-600 transition flex items-center gap-2 font-bold text-sm ml-auto md:ml-0 shrink-0"
-                  >
-                    <Icon name="Camera" size={18} /> Scan
-                  </button>
+              <div>
+                <h3 className="font-bold text-gray-800 text-lg">{exam.title}</h3>
+                <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
+                  <span className="flex items-center gap-1"><List size={14}/> {exam.numQuestions} Qs</span>
+                  {exam.sections && (
+                    <span className="flex items-center gap-1"><Layers size={14}/> {exam.sections.length} Sections</span>
+                  )}
                 </div>
               </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    // --- CREATE EXAM COMPONENT ---
-    function CreateExam({ saveExam, setView, classes, showToast, examToEdit }) {
-      const [name, setName] = useState('');
-      const [selectedClassId, setSelectedClassId] = useState('');
-      const [questions, setQuestions] = useState(50);
-      const [rollNoLength, setRollNoLength] = useState(4); 
-      
-      const [answerKey, setAnswerKey] = useState(
-        Array.from({length: 50}, () => ({ type: 'multiple_choice', options: 4, answer: 0 }))
-      );
-
-      const [bStart, setBStart] = useState(1);
-      const [bEnd, setBEnd] = useState(50);
-      const [bType, setBType] = useState('multiple_choice');
-      const [bOptions, setBOptions] = useState(4);
-
-      useEffect(() => {
-        if (examToEdit) {
-          setName(examToEdit.name || '');
-          setSelectedClassId(examToEdit.classId || '');
-          setQuestions(examToEdit.questions || 50);
-          setRollNoLength(examToEdit.rollNoLength || 4);
-          if (examToEdit.answerKey) {
-            setAnswerKey(examToEdit.answerKey);
-          }
-          setBEnd(examToEdit.questions || 50);
-        } else {
-          setName('');
-          setSelectedClassId('');
-          setQuestions(50);
-          setRollNoLength(4);
-          setAnswerKey(Array.from({length: 50}, () => ({ type: 'multiple_choice', options: 4, answer: 0 })));
-          setBEnd(50);
-        }
-      }, [examToEdit]);
-
-      const handleQuestionsChange = (e) => {
-        let val = parseInt(e.target.value) || 1;
-        if (val > 200) val = 200;
-        setQuestions(val);
-        setBEnd(val);
-        
-        setAnswerKey(prev => {
-          const newKey = [...prev];
-          if (val > prev.length) {
-            for(let i = prev.length; i < val; i++) {
-              newKey.push({ type: 'multiple_choice', options: 4, answer: 0 });
-            }
-          } else if (val < prev.length) {
-            newKey.length = val;
-          }
-          return newKey;
-        });
-      };
-
-      const applyBatch = () => {
-        if (bStart < 1 || bEnd > questions || bStart > bEnd) return showToast("Invalid batch range.");
-        setAnswerKey(prev => {
-          const newKey = [...prev];
-          for (let i = bStart - 1; i < bEnd; i++) {
-            newKey[i] = { 
-              ...newKey[i], 
-              type: bType, 
-              options: bType === 'true_false' ? 2 : bOptions,
-              answer: 0
-            };
-          }
-          return newKey;
-        });
-        showToast(`Batch applied to Q${bStart}-Q${bEnd}`);
-      };
-
-      const updateAnswer = (index, val) => {
-        setAnswerKey(prev => {
-          const newKey = [...prev];
-          newKey[index].answer = parseInt(val);
-          return newKey;
-        });
-      };
-
-      const handleSave = () => {
-        if (!name.trim()) return showToast("Please enter an exam name");
-        const selectedClass = classes?.find(c => c.id === selectedClassId);
-        
-        let updatedResults = examToEdit && examToEdit.results ? [...examToEdit.results] : [];
-        
-        if (examToEdit && updatedResults.length > 0) {
-          updatedResults = updatedResults.map(res => {
-            let newScore = 0;
-            for (let i = 0; i < questions; i++) {
-              if (res.scannedAnswers && res.scannedAnswers[i] !== undefined && res.scannedAnswers[i] === answerKey[i].answer) {
-                newScore++;
-              }
-            }
-            return { ...res, score: newScore, total: questions };
-          });
-        }
-
-        const newExam = { 
-          id: examToEdit ? examToEdit.id : Date.now().toString(),
-          name, 
-          classId: selectedClassId,
-          className: selectedClass ? selectedClass.name : '',
-          questions, 
-          rollNoLength,
-          answerKey, 
-          createdAt: examToEdit ? examToEdit.createdAt : new Date().toISOString(),
-          results: updatedResults
-        };
-        saveExam(newExam);
-        showToast(examToEdit ? "Exam updated successfully!" : "Exam created successfully!");
-        setView('dashboard');
-      };
-
-      return (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-8">
-          <div className="flex justify-between items-center mb-6 border-b pb-4">
-            <h2 className="text-2xl font-black text-gray-800">
-              {examToEdit ? "Edit Exam" : "Create New Exam"}
-            </h2>
-            {examToEdit && examToEdit.results?.length > 0 && (
-              <span className="text-xs bg-yellow-100 text-yellow-800 font-bold px-3 py-1 rounded-lg">
-                Warning: Editing will recalculate past scores.
-              </span>
-            )}
-          </div>
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">Exam Name</label>
-              <input 
-                type="text" value={name} onChange={e => setName(e.target.value)} 
-                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
-                placeholder="e.g. Midterm Mathematics"
-              />
+              <ChevronLeft className="text-gray-400 rotate-180" size={20} />
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* FAB */}
+      <button 
+        onClick={() => onNavigate('create')}
+        className="fixed bottom-6 right-6 lg:right-[calc(50%-12rem)] bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 hover:scale-105 transition-all active:scale-95 z-20"
+      >
+        <Plus size={24} />
+      </button>
+    </div>
+  );
+}
+
+// --- View: Create Exam ---
+function CreateExam({ onSave, onNavigate }) {
+  const [title, setTitle] = useState('');
+  const [sections, setSections] = useState([
+    { id: Date.now().toString(), type: 'mcq', questions: 20, options: 4 }
+  ]);
+  const [saving, setSaving] = useState(false);
+
+  const addSection = () => {
+    setSections([...sections, { id: Date.now().toString(), type: 'mcq', questions: 10, options: 4 }]);
+  };
+
+  const removeSection = (id) => {
+    if (sections.length > 1) {
+      setSections(sections.filter(s => s.id !== id));
+    }
+  };
+
+  const updateSection = (id, field, value) => {
+    setSections(sections.map(s => {
+      if (s.id === id) {
+        const updated = { ...s, [field]: value };
+        // Force options to 2 if type is switched to True/False
+        if (field === 'type' && value === 'tf') updated.options = 2;
+        // Default to 4 if switched away from TF to MCQ
+        if (field === 'type' && value === 'mcq' && s.type === 'tf') updated.options = 4;
+        return updated;
+      }
+      return s;
+    }));
+  };
+
+  const handleSaveClick = async () => {
+    if (!title.trim()) return;
+    setSaving(true);
+    try {
+      const totalQs = sections.reduce((acc, s) => acc + Number(s.questions), 0);
+      const newExam = {
+        title,
+        sections: sections.map(s => ({
+          ...s,
+          questions: Number(s.questions),
+          options: Number(s.options)
+        })),
+        numQuestions: totalQs,
+        createdAt: Date.now()
+      };
+      
+      const savedExam = await onSave(newExam);
+      onNavigate('exam-detail', savedExam);
+    } catch (err) {
+      // Silent catch
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="p-4 flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+      <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+        <label className="block text-sm font-bold text-gray-700 mb-1">Exam Title</label>
+        <input 
+          type="text" 
+          value={title} 
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full border-gray-300 border rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-lg font-semibold"
+          placeholder="e.g. Final Science Exam"
+        />
+      </div>
+
+      <div className="flex justify-between items-end">
+        <h3 className="font-bold text-gray-700 text-lg">Exam Sections</h3>
+        <button onClick={addSection} className="text-blue-600 text-sm font-semibold flex items-center gap-1 hover:text-blue-800">
+          <Plus size={16}/> Add Section
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {sections.map((section, index) => (
+          <div key={section.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 relative">
+            {sections.length > 1 && (
+              <button 
+                onClick={() => removeSection(section.id)}
+                className="absolute top-2 right-2 p-2 text-gray-400 hover:text-red-500 transition-colors bg-gray-50 rounded-full"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
             
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Assign Class</label>
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Section {index + 1}</h4>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Question Type</label>
                 <select 
-                  value={selectedClassId} onChange={e => setSelectedClassId(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
+                  value={section.type} 
+                  onChange={(e) => updateSection(section.id, 'type', e.target.value)}
+                  className="w-full border-gray-300 border rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 text-sm font-medium"
                 >
-                  <option value="">(None)</option>
-                  {classes?.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+                  <option value="mcq">Multiple Choice</option>
+                  <option value="tf">True / False</option>
+                  <option value="matching">Matching Type</option>
                 </select>
               </div>
+
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Total Items (Max 200)</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Questions</label>
                 <input 
-                  type="number" min="1" max="200" 
-                  value={questions} onChange={handleQuestionsChange} 
-                  className="w-full p-3 border border-gray-300 rounded-xl outline-none bg-gray-50"
+                  type="number" min="1" max="150"
+                  value={section.questions} 
+                  onChange={(e) => updateSection(section.id, 'questions', e.target.value)}
+                  className="w-full border-gray-300 border rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 text-sm"
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Roll No. Digits</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Choices (Up to 10)</label>
                 <select 
-                  value={rollNoLength} 
-                  onChange={e => setRollNoLength(parseInt(e.target.value) || 4)} 
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
+                  value={section.options} 
+                  onChange={(e) => updateSection(section.id, 'options', e.target.value)}
+                  disabled={section.type === 'tf'}
+                  className="w-full border-gray-300 border rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 text-sm disabled:opacity-50"
                 >
-                  <option value={2}>2 Digits</option>
-                  <option value={3}>3 Digits</option>
-                  <option value={4}>4 Digits</option>
-                  <option value={5}>5 Digits</option>
-                  <option value={6}>6 Digits</option>
+                  {section.type === 'tf' ? (
+                    <option value={2}>2 (T/F)</option>
+                  ) : (
+                    Array.from({ length: 9 }).map((_, i) => (
+                      <option key={i} value={i + 2}>{i + 2}</option>
+                    ))
+                  )}
                 </select>
               </div>
             </div>
+          </div>
+        ))}
+      </div>
 
-            <div className="bg-blue-50 p-5 rounded-xl border border-blue-100">
-              <h3 className="font-bold text-blue-900 mb-3 text-sm flex items-center gap-2">
-                <Icon name="Settings" size={16} /> Batch Formatting
-              </h3>
-              <div className="flex flex-col sm:flex-row items-end gap-3 text-sm">
-                <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-blue-200">
-                  <span className="font-bold text-gray-500">Q</span>
-                  <input type="number" value={bStart} onChange={e => setBStart(parseInt(e.target.value)||1)} className="w-14 p-1 text-center font-bold outline-none" min="1" max={questions} />
-                  <span className="font-bold text-gray-400">to</span>
-                  <input type="number" value={bEnd} onChange={e => setBEnd(parseInt(e.target.value)||1)} className="w-14 p-1 text-center font-bold outline-none" min="1" max={questions} />
+      <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm font-medium text-center mt-2 border border-blue-100">
+        Total Questions: {sections.reduce((acc, s) => acc + Number(s.questions), 0)}
+      </div>
+
+      <Button onClick={handleSaveClick} disabled={saving || !title.trim()} className="py-3 text-lg mt-2 mb-8">
+        {saving ? <RefreshCw className="animate-spin" /> : <Save />}
+        Save Exam Template
+      </Button>
+    </div>
+  );
+}
+
+// --- View: Exam Details (Tabs: Overview, Answer Key, Results) ---
+function ExamDetail({ exam, keys, results, onNavigate, onSaveKey, onDelete }) {
+  const [activeTab, setActiveTab] = useState('overview');
+
+  if (!exam) return null;
+
+  const isKeyComplete = Object.keys(keys).length === exam.numQuestions;
+
+  return (
+    <div className="flex flex-col h-full bg-gray-50">
+      <div className="flex bg-white border-b sticky top-0 z-10">
+        {['overview', 'key', 'results'].map(tab => (
+          <button 
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`flex-1 py-3 text-sm font-medium capitalize border-b-2 transition-colors ${
+              activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            {tab === 'key' ? 'Answer Key' : tab}
+          </button>
+        ))}
+      </div>
+
+      <div className="p-4 flex-1 overflow-y-auto">
+        {activeTab === 'overview' && (
+          <div className="flex flex-col gap-4 animate-in fade-in">
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+              <h3 className="text-xl font-bold text-gray-800 mb-4">{exam.title}</h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                  <span className="text-blue-600 font-medium block">Questions</span>
+                  <span className="text-2xl font-bold text-blue-900">{exam.numQuestions}</span>
                 </div>
-                <select value={bType} onChange={e => setBType(e.target.value)} className="p-3 border border-blue-200 rounded-lg bg-white flex-1 outline-none font-medium text-gray-700">
-                  <option value="multiple_choice">Multiple Choice</option>
-                  <option value="true_false">True / False</option>
-                </select>
-                {bType === 'multiple_choice' && (
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-blue-800 uppercase pl-1">Options</span>
-                    <input type="number" value={bOptions} onChange={e => setBOptions(Math.min(10, Math.max(2, parseInt(e.target.value)||4)))} className="w-16 p-2.5 border border-blue-200 rounded-lg text-center font-bold" min="2" max="10" />
-                  </div>
-                )}
-                <button onClick={applyBatch} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 w-full sm:w-auto shadow">Apply</button>
+                <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                  <span className="text-green-600 font-medium block">Scanned</span>
+                  <span className="text-2xl font-bold text-green-900">{results.length}</span>
+                </div>
               </div>
             </div>
 
-            <div className="pt-2">
-              <h3 className="font-black text-lg text-gray-800 mb-4 flex items-center justify-between">
-                Set Answer Key 
-                <span className="text-xs bg-gray-200 text-gray-600 py-1 px-3 rounded-full font-bold">Tap bubble to select correct answer</span>
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                {answerKey.map((qData, idx) => (
-                  <div key={idx} className="flex flex-col bg-white p-3 rounded-xl shadow-sm border border-gray-200">
-                    <div className="flex justify-between items-center mb-2 border-b border-gray-100 pb-2">
-                       <span className="font-black text-gray-700 text-lg">Q{idx + 1}</span>
-                       <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-1 rounded-md font-bold uppercase tracking-widest">
-                         {qData.type === 'true_false' ? 'T/F' : `MCQ-${qData.options}`}
-                       </span>
-                    </div>
-                    <div className="flex gap-2 flex-wrap justify-center">
-                      {Array.from({length: qData.options}).map((_, optIdx) => {
-                        const label = qData.type === 'true_false' ? (optIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + optIdx);
-                        const isSelected = qData.answer === optIdx;
-                        return (
-                          <button
-                            key={optIdx}
-                            onClick={() => updateAnswer(idx, optIdx)}
-                            className={`w-10 h-10 rounded-full font-black text-sm flex-shrink-0 transition transform hover:scale-105 ${isSelected ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300 ring-offset-1' : 'bg-gray-100 text-gray-500 border border-gray-300 hover:bg-gray-200'}`}
-                          >
-                            {label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 flex flex-col gap-3">
+              <h4 className="font-semibold text-gray-700 flex items-center gap-2">
+                <Settings size={18} /> Actions
+              </h4>
+              <Button onClick={() => onNavigate('scanner')} icon={Camera} className="py-3" disabled={!isKeyComplete}>
+                Scan OMR Sheet
+              </Button>
+              {!isKeyComplete && (
+                <p className="text-xs text-orange-600 flex items-center gap-1 mt-1">
+                  <AlertCircle size={14} /> Please set the answer key completely before scanning.
+                </p>
+              )}
+              <Button onClick={() => onNavigate('print')} variant="outline" icon={Printer} className="py-3 bg-white">
+                Generate Template
+              </Button>
+              <Button onClick={onDelete} variant="danger" icon={Trash2} className="mt-4">Delete Exam</Button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'key' && (
+          <AnswerKeyEditor exam={exam} keys={keys} onSaveKey={onSaveKey} />
+        )}
+
+        {activeTab === 'results' && (
+          <ResultsView results={results} exam={exam} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Component: Answer Key Editor ---
+function AnswerKeyEditor({ exam, keys, onSaveKey }) {
+  const configs = getQuestionConfigs(exam);
+
+  const progress = Math.round((Object.keys(keys).length / exam.numQuestions) * 100);
+
+  return (
+    <div className="animate-in fade-in flex flex-col gap-4">
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 sticky top-0 z-10">
+        <div className="flex justify-between items-center mb-2">
+          <span className="font-medium text-gray-700">Completion</span>
+          <span className="text-sm font-bold text-blue-600">{progress}%</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2">
+          <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        {configs.map((config) => {
+          const selected = keys[config.qNum];
+          return (
+            <div key={config.qNum} className="flex items-center p-3 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
+              <div className="w-8 font-semibold text-gray-500 text-right mr-4 flex-shrink-0">{config.qNum}.</div>
+              <div className="flex flex-wrap gap-1.5 flex-1">
+                {config.labels.map((label, optIndex) => (
+                  <button
+                    key={optIndex}
+                    onClick={() => onSaveKey(exam.id, config.qNum, optIndex)}
+                    className={`w-9 h-9 rounded-full border-2 text-sm font-bold flex items-center justify-center transition-all ${
+                      selected === optIndex 
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-md z-10' 
+                        : 'border-gray-300 text-gray-500 hover:border-blue-400 bg-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
                 ))}
               </div>
             </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-            <button 
-              onClick={handleSave}
-              className="w-full bg-blue-600 text-white p-4 rounded-xl mt-8 font-black flex justify-center items-center gap-2 hover:bg-blue-700 shadow-lg text-lg"
-            >
-              <Icon name="Save" size={24} /> {examToEdit ? "Update Exam & Recalculate" : "Create Exam & Save to Cloud"}
-            </button>
-          </div>
+// --- Component: Results View ---
+function ResultsView({ results, exam }) {
+  if (results.length === 0) {
+    return (
+      <div className="text-center py-12 px-4 bg-white rounded-xl shadow-sm border border-gray-100 mt-4 animate-in fade-in">
+        <ImageIcon className="mx-auto text-gray-300 mb-3" size={48} />
+        <p className="text-gray-500">No scanned results yet.</p>
+        <p className="text-sm text-gray-400">Scan sheets to see them here.</p>
+      </div>
+    );
+  }
+
+  const avgScore = results.length > 0 
+    ? (results.reduce((acc, curr) => acc + curr.score, 0) / results.length).toFixed(1) 
+    : 0;
+
+  return (
+    <div className="animate-in fade-in flex flex-col gap-4">
+       <div className="bg-blue-600 text-white p-4 rounded-xl shadow-sm flex justify-between items-center">
+        <div>
+          <span className="text-blue-200 text-sm block">Average Score</span>
+          <span className="text-2xl font-bold">{avgScore} <span className="text-base font-normal">/ {exam.numQuestions}</span></span>
         </div>
-      );
-    }
-
-    // --- SCANNER COMPONENT (OMR LOGIC) ---
-    function Scanner({ exam, classes, setView, saveExam, setCurrentExam, showToast }) {
-      const videoRef = useRef(null);
-      const trackingCanvasRef = useRef(null);
-      const overlayCanvasRef = useRef(null);
-      const scanLoopRef = useRef(null);
-      const lastValidQuad = useRef(null);
-      
-      const [stream, setStream] = useState(null);
-      const [result, setResult] = useState(null);
-      const [studentId, setStudentId] = useState('');
-      const [scannedStudentName, setScannedStudentName] = useState('');
-      
-      const [isProcessing, setIsProcessing] = useState(false);
-      const [isAligned, setIsAligned] = useState(false);
-      const [autoScanEnabled, setAutoScanEnabled] = useState(true);
-      const alignmentFrames = useRef(0);
-
-      const numCols = exam.questions <= 40 ? 2 : exam.questions <= 90 ? 3 : exam.questions <= 140 ? 4 : 5;
-      const rowsPerCol = Math.ceil(exam.questions / numCols);
-      const rnLength = exam.rollNoLength || 4;
-
-      useEffect(() => {
-        const startCamera = async () => {
-          try {
-            const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-            setStream(s);
-            if (videoRef.current) {
-              videoRef.current.srcObject = s;
-              videoRef.current.play();
-            }
-          } catch (err) {
-            showToast("Camera access denied or unavailable.");
-          }
-        };
-        startCamera();
-        return () => { 
-          if (stream) stream.getTracks().forEach(t => t.stop()); 
-          if (scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
-        };
-      }, []);
-
-      // Calculate quad-perspective mapped point to support tilted/rotated scanning
-      const getMappedPoint = (templateX, templateY, quads) => {
-          // The center of the 40x40 black corner markers is exactly at 20px inward on the 816x1056 paper.
-          const u = (templateX - 20) / (816 - 40);
-          const v = (templateY - 20) / (1056 - 40);
-          
-          // Bilinear interpolation mapping standard rectangle to the detected quad
-          const x = quads.tl.x * (1-u)*(1-v) + quads.tr.x * u*(1-v) + quads.bl.x * (1-u)*v + quads.br.x * u*v;
-          const y = quads.tl.y * (1-u)*(1-v) + quads.tr.y * u*(1-v) + quads.bl.y * (1-u)*v + quads.br.y * u*v;
-          return {x, y};
-      };
-
-      const processImage = () => {
-        if (!videoRef.current) return;
-        if (!lastValidQuad.current) {
-           showToast("Could not find the 4 corner markers! Please align within the guide.");
-           return;
-        }
-
-        setIsProcessing(true);
-        if (scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
-
-        const video = videoRef.current;
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        const quads = lastValidQuad.current;
-        
-        // Calculate dynamic bubble size based on the detected perspective quad size
-        const quadScale = Math.hypot(quads.tl.x - quads.tr.x, quads.tl.y - quads.tr.y) / 816;
-        
-        const sampleDarkness = (templateX, templateY, baseSize) => {
-            const p = getMappedPoint(templateX, templateY, quads);
-            const size = Math.max(4, Math.floor(baseSize * quadScale));
-            
-            const sx = Math.floor(p.x - size/2);
-            const sy = Math.floor(p.y - size/2);
-            
-            if(sx < 0 || sy < 0 || sx+size > canvas.width || sy+size > canvas.height) return 0;
-            
-            const imgData = ctx.getImageData(sx, sy, size, size).data;
-            let total = 0;
-            for(let i=0; i<imgData.length; i+=4) {
-                total += 255 - ((imgData[i] + imgData[i+1] + imgData[i+2]) / 3);
-            }
-            return total / (imgData.length / 4);
-        };
-
-        // --- EXTRACT ROLL NUMBER ---
-        let scannedRollNo = '';
-        const rnStartX = 816 * 0.55;
-        const rnTotalW = 816 * 0.40;
-        const rnColW = rnTotalW / rnLength;
-        const rnBubbleZoneY = 1056 * 0.10 + 30;
-        const rnBubbleZoneH = (1056 * 0.24) - 30;
-        const actualRnRowH = rnBubbleZoneH / 10;
-
-        for (let c = 0; c < rnLength; c++) {
-          let maxD = 0; let bestVal = -1;
-          const cellCenterX = rnStartX + (c * rnColW) + (rnColW / 2);
-          for (let r = 0; r < 10; r++) {
-            const cellCenterY = rnBubbleZoneY + (r * actualRnRowH) + (actualRnRowH / 2);
-            const d = sampleDarkness(cellCenterX, cellCenterY, 14); // 14 is base sample size
-            if (d > maxD && d > 60) { maxD = d; bestVal = r; }
-          }
-          scannedRollNo += bestVal !== -1 ? bestVal.toString() : '?';
-        }
-
-        // --- EXTRACT ANSWERS ---
-        let scannedAnswers = [];
-        let score = 0;
-
-        const ansStartX = 816 * 0.05;
-        const ansStartY = 1056 * 0.40;
-        const ansTotalW = 816 * 0.90;
-        const ansTotalH = 1056 * 0.55;
-        const colW = ansTotalW / numCols;
-        const rowH = ansTotalH / rowsPerCol;
-
-        for (let q = 0; q < exam.questions; q++) {
-          const qData = exam.answerKey[q];
-          const cIdx = Math.floor(q / rowsPerCol);
-          const rIdx = q % rowsPerCol;
-          
-          const qStartX = ansStartX + (cIdx * colW);
-          const qStartY = ansStartY + (rIdx * rowH);
-          
-          const optStartX = qStartX + colW * 0.35;
-          const optW = colW * 0.65;
-
-          let maxD = 0; let bestOpt = -1;
-
-          for (let o = 0; o < qData.options; o++) {
-            const cellCenterX = optStartX + (optW / qData.options) * (o + 0.5);
-            const cellCenterY = qStartY + rowH / 2;
-
-            const d = sampleDarkness(cellCenterX, cellCenterY, 16);
-            if (d > maxD && d > 60) { maxD = d; bestOpt = o; }
-          }
-          scannedAnswers.push(bestOpt);
-          if (bestOpt === qData.answer) score++;
-        }
-
-        // --- ROSTER LOOKUP ---
-        let foundName = '';
-        const cleanRoll = scannedRollNo.replace(/\?/g, '');
-        
-        if (exam.classId && classes.length > 0) {
-          const assignedClass = classes.find(c => c.id === exam.classId);
-          if (assignedClass && cleanRoll) {
-            const matchedStudent = assignedClass.students.find(s => 
-              s.rollNo === cleanRoll || parseInt(s.rollNo) === parseInt(cleanRoll)
-            );
-            if (matchedStudent) {
-              foundName = matchedStudent.name;
-            }
-          }
-        }
-
-        setResult({ score, total: exam.questions, scannedAnswers, scannedRollNo });
-        setStudentId(cleanRoll);
-        setScannedStudentName(foundName);
-        setIsProcessing(false);
-        setIsAligned(false);
-      };
-
-      // --- AUTO SCAN TRACING LOOP (EVALBEE STYLE) ---
-      const checkAlignmentLoop = () => {
-        if (isProcessing || result) return;
-
-        const video = videoRef.current;
-        const tracking = trackingCanvasRef.current;
-        const overlay = overlayCanvasRef.current;
-
-        if (video && video.readyState === video.HAVE_ENOUGH_DATA && tracking && overlay) {
-            
-            // Sync overlay canvas to actual display pixels
-            overlay.width = video.clientWidth;
-            overlay.height = video.clientHeight;
-
-            const tw = tracking.width;
-            const th = tracking.height;
-            const ctxT = tracking.getContext('2d', { willReadFrequently: true });
-            ctxT.drawImage(video, 0, 0, tw, th);
-            const imgData = ctxT.getImageData(0, 0, tw, th).data;
-
-            // Algorithm to quickly find darkest density in a specific search region
-            const findDarkestBlock = (startX, startY, radius) => {
-                let bestAvg = 255; let bestX = startX; let bestY = startY;
-                const bs = 8; // block size to sample
-                const minX = Math.max(0, Math.floor(startX - radius));
-                const maxX = Math.min(tw - bs, Math.floor(startX + radius));
-                const minY = Math.max(0, Math.floor(startY - radius));
-                const maxY = Math.min(th - bs, Math.floor(startY + radius));
-
-                for (let y = minY; y < maxY; y += 2) {
-                    for (let x = minX; x < maxX; x += 2) {
-                        let sum = 0;
-                        for(let by=0; by<bs; by+=2){
-                            for(let bx=0; bx<bs; bx+=2){
-                                const idx = ((y+by)*tw + (x+bx))*4;
-                                sum += (imgData[idx] + imgData[idx+1] + imgData[idx+2])/3;
-                            }
-                        }
-                        const avg = sum/16; // 4x4 samples (bs=8, step=2)
-                        if (avg < bestAvg) {
-                            bestAvg = avg;
-                            bestX = x + bs/2;
-                            bestY = y + bs/2;
-                        }
-                    }
-                }
-                return { x: bestX, y: bestY, brightness: bestAvg };
-            };
-
-            // Expected Paper bounding box to create our Search Regions
-            const expectedW = th * 0.9 * (816/1056);
-            const expectedH = th * 0.9;
-            const cx = tw / 2; const cy = th / 2;
-            
-            const expTL = { x: cx - expectedW/2, y: cy - expectedH/2 };
-            const expTR = { x: cx + expectedW/2, y: cy - expectedH/2 };
-            const expBL = { x: cx - expectedW/2, y: cy + expectedH/2 };
-            const expBR = { x: cx + expectedW/2, y: cy + expectedH/2 };
-
-            const searchRadius = tw * 0.15; // Fairly wide catch radius
-
-            const tl = findDarkestBlock(expTL.x, expTL.y, searchRadius);
-            const tr = findDarkestBlock(expTR.x, expTR.y, searchRadius);
-            const bl = findDarkestBlock(expBL.x, expBL.y, searchRadius);
-            const br = findDarkestBlock(expBR.x, expBR.y, searchRadius);
-
-            const thresh = 90; // Marker must be relatively black
-            let validQuad = null;
-
-            if (tl.brightness < thresh && tr.brightness < thresh && bl.brightness < thresh && br.brightness < thresh) {
-                // Verify Geometry (Is it actually rectangular-ish?)
-                const wTop = Math.hypot(tl.x - tr.x, tl.y - tr.y);
-                const wBot = Math.hypot(bl.x - br.x, bl.y - br.y);
-                const lH = Math.hypot(tl.x - bl.x, tl.y - bl.y);
-                const rH = Math.hypot(tr.x - br.x, tr.y - br.y);
-                
-                if (Math.abs(wTop - wBot) < wTop * 0.3 && Math.abs(lH - rH) < lH * 0.3 && wTop > tw * 0.3) {
-                    const scaleX = video.videoWidth / tw;
-                    const scaleY = video.videoHeight / th;
-                    validQuad = {
-                        tl: {x: tl.x * scaleX, y: tl.y * scaleY},
-                        tr: {x: tr.x * scaleX, y: tr.y * scaleY},
-                        bl: {x: bl.x * scaleX, y: bl.y * scaleY},
-                        br: {x: br.x * scaleX, y: br.y * scaleY},
-                    };
-                    lastValidQuad.current = validQuad;
-                }
-            }
-
-            // --- DRAW MAGNETIC OVERLAY ---
-            const ctxO = overlay.getContext('2d');
-            ctxO.clearRect(0, 0, overlay.width, overlay.height);
-
-            if (validQuad) {
-                setIsAligned(true);
-                alignmentFrames.current += 1;
-
-                // Draw solid green perspective tracker
-                ctxO.strokeStyle = '#22c55e'; // Green
-                ctxO.lineWidth = 4;
-                ctxO.beginPath();
-                const dX = overlay.width / video.videoWidth;
-                const dY = overlay.height / video.videoHeight;
-                ctxO.moveTo(validQuad.tl.x * dX, validQuad.tl.y * dY);
-                ctxO.lineTo(validQuad.tr.x * dX, validQuad.tr.y * dY);
-                ctxO.lineTo(validQuad.br.x * dX, validQuad.br.y * dY);
-                ctxO.lineTo(validQuad.bl.x * dX, validQuad.bl.y * dY);
-                ctxO.closePath();
-                ctxO.stroke();
-                ctxO.fillStyle = 'rgba(34, 197, 94, 0.15)'; // Light green tint
-                ctxO.fill();
-
-                if (autoScanEnabled && alignmentFrames.current > 5) {
-                    processImage();
-                    return;
-                }
-            } else {
-                setIsAligned(false);
-                alignmentFrames.current = 0;
-
-                // Draw expected target guide
-                const tW = overlay.height * 0.85 * (816/1056);
-                const tH = overlay.height * 0.85;
-                const tX = (overlay.width - tW) / 2;
-                const tY = (overlay.height - tH) / 2;
-
-                ctxO.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-                ctxO.setLineDash([10, 10]);
-                ctxO.lineWidth = 2;
-                ctxO.strokeRect(tX, tY, tW, tH);
-                ctxO.setLineDash([]);
-                
-                // Draw corner hints
-                const L = 20;
-                ctxO.lineWidth = 4;
-                ctxO.strokeStyle = '#ef4444'; // Red
-                // TL
-                ctxO.beginPath(); ctxO.moveTo(tX, tY+L); ctxO.lineTo(tX, tY); ctxO.lineTo(tX+L, tY); ctxO.stroke();
-                // TR
-                ctxO.beginPath(); ctxO.moveTo(tX+tW-L, tY); ctxO.lineTo(tX+tW, tY); ctxO.lineTo(tX+tW, tY+L); ctxO.stroke();
-                // BL
-                ctxO.beginPath(); ctxO.moveTo(tX, tY+tH-L); ctxO.lineTo(tX, tY+tH); ctxO.lineTo(tX+L, tY+tH); ctxO.stroke();
-                // BR
-                ctxO.beginPath(); ctxO.moveTo(tX+tW-L, tY+tH); ctxO.lineTo(tX+tW, tY+tH); ctxO.lineTo(tX+tW, tY+tH-L); ctxO.stroke();
-            }
-        }
-        scanLoopRef.current = requestAnimationFrame(checkAlignmentLoop);
-      };
-
-      useEffect(() => {
-          if (stream && !result && !isProcessing && autoScanEnabled) {
-              scanLoopRef.current = requestAnimationFrame(checkAlignmentLoop);
-          }
-          return () => {
-              if (scanLoopRef.current) cancelAnimationFrame(scanLoopRef.current);
-          }
-      }, [stream, result, isProcessing, autoScanEnabled]);
-
-      const saveResult = async () => {
-        if (!studentId) return showToast("Please verify Student ID/Name before saving");
-        
-        const newResult = {
-          studentId,
-          studentName: scannedStudentName,
-          score: result.score,
-          total: result.total,
-          scannedAnswers: result.scannedAnswers,
-          timestamp: new Date().toISOString()
-        };
-
-        const updatedExam = { ...exam, results: [...(exam.results || []), newResult] };
-        
-        setCurrentExam(updatedExam);
-        setResult(null);
-        setStudentId('');
-        setScannedStudentName('');
-        
-        await saveExam(updatedExam);
-        showToast("Score saved securely to cloud!");
-      };
-
-      return (
-        <div className="flex flex-col h-[calc(100vh-140px)]">
-          <div className="flex justify-between items-center mb-4 bg-white p-3 rounded-xl shadow-sm border border-gray-100">
-            <div className="flex items-center gap-3">
-              <h2 className="text-lg font-black text-gray-800 flex items-center gap-2">
-                <span className={`w-3 h-3 rounded-full ${autoScanEnabled ? 'bg-red-500 animate-pulse' : 'bg-gray-400'}`}></span> 
-                {exam.name}
-              </h2>
-              <label className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-lg cursor-pointer">
-                <input type="checkbox" checked={autoScanEnabled} onChange={e => setAutoScanEnabled(e.target.checked)} className="rounded" />
-                <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">Auto-Scan</span>
-              </label>
-            </div>
-            <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-black text-sm font-bold bg-gray-100 px-3 py-1 rounded-lg">Cancel</button>
-          </div>
-
-          {!result ? (
-            <div className="relative flex-1 bg-black rounded-2xl overflow-hidden shadow-2xl border-4 border-gray-900 flex flex-col justify-center items-center">
-              <video 
-                ref={videoRef} autoPlay playsInline 
-                className="absolute inset-0 w-full h-full object-cover opacity-80"
-              />
-              
-              {/* Dynamic Tracking Overlay */}
-              <canvas ref={overlayCanvasRef} className="absolute inset-0 w-full h-full z-10 pointer-events-none" />
-              
-              {/* Hidden fast-processing canvas */}
-              <canvas ref={trackingCanvasRef} width={320} height={240} className="hidden" />
-
-              {!isAligned && (
-                 <span className="absolute top-4 left-1/2 transform -translate-x-1/2 text-xs font-black bg-black/80 text-white px-4 py-1.5 rounded-full whitespace-nowrap z-20 shadow-md">
-                   HOLD VERTICALLY • ALIGN 4 BLACK CORNERS
-                 </span>
-              )}
-
-              {!autoScanEnabled && (
-                <button 
-                  onClick={processImage}
-                  disabled={isProcessing}
-                  className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white text-blue-600 font-black py-4 px-10 rounded-full shadow-[0_4px_20px_rgba(255,255,255,0.4)] hover:scale-105 transition disabled:opacity-50 text-lg z-20"
-                >
-                  {isProcessing ? 'Reading...' : 'Capture Image'}
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="flex-1 bg-white p-6 rounded-2xl shadow-lg border border-gray-100 flex flex-col items-center relative overflow-y-auto">
-              
-              <div className="text-center w-full mb-6 mt-4">
-                <p className="text-gray-500 font-bold uppercase tracking-widest text-xs mb-1">Final Score</p>
-                <div className="text-6xl font-black text-blue-600 mb-2">
-                  {result.score} <span className="text-3xl text-gray-400">/ {result.total}</span>
-                </div>
-                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden max-w-xs mx-auto">
-                  <div className="bg-blue-600 h-full" style={{width: `${(result.score/result.total)*100}%`}}></div>
-                </div>
-              </div>
-
-              {/* Identity Verification Block */}
-              <div className="w-full max-w-sm bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6 relative">
-                 <div className="absolute -top-3 left-4 bg-blue-600 text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-wider">
-                   Student Verification
-                 </div>
-                 
-                 <div className="mb-3">
-                   <p className="text-xs text-blue-800 font-bold mb-1">Scanned Roll No:</p>
-                   <div className="flex gap-1 justify-center">
-                     {result.scannedRollNo.split('').map((char, i) => (
-                       <div key={i} className={`w-8 h-10 flex items-center justify-center font-mono font-black text-xl rounded border ${char === '?' ? 'bg-red-100 border-red-300 text-red-600' : 'bg-white border-blue-200 text-blue-900'}`}>
-                         {char}
-                       </div>
-                     ))}
-                   </div>
-                   {result.scannedRollNo.includes('?') && (
-                     <p className="text-sm text-red-600 text-center mt-2 font-black">Invalid Roll Number! Please correct manually.</p>
-                   )}
-                 </div>
-
-                 {scannedStudentName ? (
-                   <div className="bg-green-100 border border-green-200 rounded-lg p-3 text-center flex flex-col items-center">
-                     <Icon name="UserCheck" className="text-green-600 mb-1" />
-                     <p className="text-xs text-green-700 font-bold uppercase">Roster Match Found</p>
-                     <p className="font-black text-green-900 text-lg">{scannedStudentName}</p>
-                   </div>
-                 ) : (
-                   <div className="bg-yellow-100 border border-yellow-200 rounded-lg p-3 text-center">
-                     <p className="text-xs text-yellow-700 font-bold">No roster match found for this Roll No.</p>
-                   </div>
-                 )}
-
-                 <div className="mt-4 pt-4 border-t border-blue-200">
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Confirm/Edit Roll No:</label>
-                    <input 
-                      type="text" value={studentId} onChange={e => {
-                        setStudentId(e.target.value);
-                      }}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none text-center font-bold text-lg bg-white"
-                      placeholder="Enter Roll No"
-                    />
-                 </div>
-              </div>
-
-              <div className="flex gap-4 w-full max-w-sm mt-auto">
-                <button 
-                  onClick={() => setResult(null)}
-                  className="w-1/3 bg-gray-200 text-gray-700 p-4 rounded-xl font-bold hover:bg-gray-300 transition text-sm"
-                >
-                  Discard
-                </button>
-                <button 
-                  onClick={saveResult}
-                  className="w-2/3 bg-green-500 text-white p-4 rounded-xl font-black hover:bg-green-600 flex items-center justify-center gap-2 shadow-lg shadow-green-200 transition"
-                >
-                  <Icon name="Save" size={20} /> Save Result
-                </button>
-              </div>
-            </div>
-          )}
+        <div className="bg-blue-500 p-2 rounded-lg">
+           <User size={24} className="text-white" />
         </div>
-      );
-    }
+      </div>
 
-    // --- SETTINGS COMPONENT ---
-    function SettingsPanel({ user }) {
-      return (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-          <h2 className="text-2xl font-black mb-6 text-gray-800 flex items-center gap-2 border-b pb-4">
-            <Icon name="Settings" size={24} className="text-blue-600"/> Account Settings
-          </h2>
-          
-          <div className="space-y-6">
-            <div className="bg-green-50 p-5 rounded-xl border border-green-200 flex items-start gap-3">
-              <Icon name="CheckCircle" size={24} className="text-green-600 mt-0.5" />
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        {results.map(res => {
+          const percentage = Math.round((res.score / exam.numQuestions) * 100);
+          return (
+            <div key={res.id} className="p-4 border-b border-gray-100 last:border-0 flex justify-between items-center hover:bg-gray-50">
               <div>
-                <h3 className="font-bold text-green-900 text-lg">Cloud Database Active</h3>
-                <p className="text-sm text-green-800 mt-1">
-                  Your account is securely connected to the internal Firebase Cloud. All your classes, exams, and student scores are encrypted and synced automatically.
-                </p>
+                <div className="font-bold text-gray-800">{res.studentName || 'Unknown Student'}</div>
+                <div className="text-xs font-medium text-gray-500 mb-1">
+                  ID: {res.studentId} {res.className ? `• Class: ${res.className}` : ''}
+                </div>
+                <div className="text-xs text-gray-400">{new Date(res.timestamp).toLocaleString()}</div>
+              </div>
+              <div className="text-right">
+                <div className={`font-bold text-lg ${percentage >= 50 ? 'text-green-600' : 'text-orange-500'}`}>
+                  {res.score} / {exam.numQuestions}
+                </div>
+                <div className="text-xs font-medium text-gray-500">{percentage}%</div>
               </div>
             </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-            <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
-              <p className="text-sm text-gray-500 font-bold uppercase tracking-wider mb-1">Logged in as</p>
-              <p className="text-xl font-black text-gray-800">{user.email}</p>
+// --- View: Camera Scanner ---
+function Scanner({ exam, onNavigate }) {
+  const videoRef = useRef(null);
+  const [stream, setStream] = useState(null);
+  const [error, setError] = useState('');
+
+  if (!exam) return null;
+
+  useEffect(() => {
+    let activeStream = null;
+    const startCamera = async () => {
+      try {
+        const constraints = { video: { facingMode: 'environment' } };
+        activeStream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (videoRef.current) {
+          videoRef.current.srcObject = activeStream;
+        }
+        setStream(activeStream);
+      } catch (err) {
+        // Silent catch for camera access
+        setError('Camera access denied or unavailable. Please use a device with a camera.');
+      }
+    };
+    startCamera();
+
+    return () => {
+      if (activeStream) activeStream.getTracks().forEach(track => track.stop());
+    };
+  }, []);
+
+  const handleCapture = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    onNavigate('review');
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black z-50 flex flex-col">
+      <div className="p-4 flex justify-between items-center text-white z-10 bg-gradient-to-b from-black/70 to-transparent">
+        <button onClick={() => onNavigate('exam-detail')} className="p-2 bg-black/50 rounded-full hover:bg-black/70">
+          <XCircle size={28} />
+        </button>
+        <span className="font-semibold tracking-wide">Align Sheet in Frame</span>
+        <div className="w-10"></div>
+      </div>
+
+      <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+        {error ? (
+          <div className="text-white text-center p-6">
+            <AlertCircle size={48} className="text-red-500 mx-auto mb-4" />
+            <p>{error}</p>
+          </div>
+        ) : (
+          <>
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            {/* OMR Alignment Overlay */}
+            <div className="absolute inset-4 border-2 border-green-500/50 rounded-lg pointer-events-none flex flex-col justify-between p-2">
+              <div className="flex justify-between">
+                <div className="w-6 h-6 border-t-4 border-l-4 border-green-500"></div>
+                <div className="w-6 h-6 border-t-4 border-r-4 border-green-500"></div>
+              </div>
+              <div className="flex justify-between">
+                <div className="w-6 h-6 border-b-4 border-l-4 border-green-500"></div>
+                <div className="w-6 h-6 border-b-4 border-r-4 border-green-500"></div>
+              </div>
             </div>
+            
+            {/* Scanner Sweeper Animation */}
+            <div className="absolute inset-0 w-full h-[2px] bg-green-400/80 shadow-[0_0_8px_rgba(74,222,128,0.8)] animate-[scan_2s_ease-in-out_infinite]" style={{ top: '10%' }}></div>
+          </>
+        )}
+      </div>
+
+      <div className="p-6 pb-12 bg-black/80 flex justify-center items-center backdrop-blur-sm">
+        <button 
+          onClick={handleCapture}
+          disabled={!!error}
+          className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 flex items-center justify-center active:bg-gray-200 transition-colors disabled:opacity-50"
+        >
+          <div className="w-16 h-16 rounded-full border-2 border-black/10"></div>
+        </button>
+      </div>
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes scan {
+          0% { transform: translateY(0vh); opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { transform: translateY(60vh); opacity: 0; }
+        }
+      `}} />
+    </div>
+  );
+}
+
+// --- View: Review Scan & Save ---
+function ReviewScan({ exam, answerKeys, onSaveResult, onNavigate }) {
+  const [studentId, setStudentId] = useState('');
+  const [studentName, setStudentName] = useState('');
+  const [className, setClassName] = useState('');
+  const [scannedAnswers, setScannedAnswers] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState(true);
+
+  if (!exam) return null;
+  const configs = getQuestionConfigs(exam);
+
+  // Simulate OMR processing delay & random generation
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const mockScanned = {};
+      
+      for (let config of configs) {
+        const qNum = config.qNum;
+        const numOpts = config.labels.length;
+        
+        // 80% chance to match the key (simulate smart student/good scan)
+        if (Math.random() > 0.2) {
+          mockScanned[qNum] = answerKeys[qNum] !== undefined ? answerKeys[qNum] : null;
+        } else {
+          // 20% chance of random answer or blank
+          const rand = Math.floor(Math.random() * (numOpts + 1));
+          mockScanned[qNum] = rand < numOpts ? rand : null; // null = unreadable/blank
+        }
+      }
+      setScannedAnswers(mockScanned);
+      setStudentId(`STU-${Math.floor(1000 + Math.random() * 9000)}`);
+      setAnalyzing(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [exam, answerKeys, configs]);
+
+  const updateAnswer = (qNum, optIndex) => {
+    setScannedAnswers(prev => ({ ...prev, [qNum]: optIndex }));
+  };
+
+  const calculateScore = () => {
+    let score = 0;
+    for (let i = 1; i <= exam.numQuestions; i++) {
+      if (scannedAnswers[i] === answerKeys[i] && answerKeys[i] !== undefined) {
+        score++;
+      }
+    }
+    return score;
+  };
+
+  const handleSaveResultClick = async () => {
+    if (!studentId.trim()) return;
+    setSaving(true);
+    try {
+      const score = calculateScore();
+      const resultData = {
+        studentId,
+        studentName: studentName || 'Unknown Student',
+        className: className || '',
+        score,
+        answers: scannedAnswers,
+        timestamp: Date.now()
+      };
+      await onSaveResult(exam.id, resultData);
+      onNavigate('exam-detail');
+    } catch (err) {
+      // Silent catch
+      setSaving(false);
+    }
+  };
+
+  if (analyzing) {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center gap-4 text-gray-500 animate-in fade-in">
+        <RefreshCw className="animate-spin text-blue-600" size={48} />
+        <h2 className="text-xl font-semibold text-gray-700">Processing Sheet...</h2>
+        <p className="text-sm">Applying contour detection and thresholding algorithms</p>
+      </div>
+    );
+  }
+
+  const score = calculateScore();
+
+  return (
+    <div className="p-4 flex flex-col gap-4 animate-in slide-in-from-right-4 duration-300 pb-24">
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+        <h3 className="font-bold text-gray-800 flex items-center gap-2">
+          <Edit3 size={18} className="text-blue-600" /> Review & Edit Scan
+        </h3>
+        
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Student Name</label>
+            <input 
+              type="text" 
+              value={studentName}
+              onChange={(e) => setStudentName(e.target.value)}
+              placeholder="e.g. Jane Doe"
+              className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm font-medium"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Class / Section</label>
+            <input 
+              type="text" 
+              value={className}
+              onChange={(e) => setClassName(e.target.value)}
+              placeholder="e.g. 10-A"
+              className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Roll No / ID</label>
+            <input 
+              type="text" 
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+              className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm font-bold"
+            />
           </div>
         </div>
-      );
-    }
 
-    // --- ROSTER: CLASSES MANAGER ---
-    function ClassesManager({ classes, saveClass, setView, setCurrentClass, deleteClass }) {
-      const [newClassName, setNewClassName] = useState('');
-      const [confirmDelete, setConfirmDelete] = useState(null);
-      
-      const handleCreate = () => {
-        if (!newClassName.trim()) return;
-        const newClass = { id: Date.now().toString(), name: newClassName, students: [], createdAt: new Date().toISOString() };
-        saveClass(newClass);
-        setNewClassName('');
-      };
+        <div className="mt-2 bg-blue-50 p-4 rounded-lg flex justify-between items-center border border-blue-100">
+          <span className="font-medium text-blue-900">Calculated Score</span>
+          <span className="text-3xl font-bold text-blue-600">{score} <span className="text-base font-medium text-blue-400">/ {exam.numQuestions}</span></span>
+        </div>
+      </div>
 
-      return (
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <h2 className="text-2xl font-black mb-4 text-gray-800 flex items-center gap-2 border-b pb-4">
-              <Icon name="Users" size={24} className="text-blue-600"/> Manage Classes
-            </h2>
-            <div className="flex gap-2">
-              <input 
-                type="text" value={newClassName} onChange={e => setNewClassName(e.target.value)} 
-                placeholder="e.g. Grade 10 Math"
-                className="flex-1 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 font-medium"
-              />
-              <button onClick={handleCreate} className="bg-blue-600 text-white px-6 rounded-xl font-black hover:bg-blue-700 transition shadow">
-                Add Class
-              </button>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-gray-50 p-3 border-b text-xs font-semibold text-gray-500 flex justify-between">
+          <span>Question</span>
+          <span className="mr-8">Detected Answer</span>
+        </div>
+        
+        {configs.map((config) => {
+          const qNum = config.qNum;
+          const detected = scannedAnswers[qNum];
+          const correct = answerKeys[qNum];
+          const isCorrect = detected === correct;
+          
+          return (
+            <div key={qNum} className={`flex items-center justify-between p-3 border-b border-gray-50 last:border-0 ${isCorrect ? 'bg-white' : 'bg-red-50/30'}`}>
+              <div className="flex items-center gap-2 w-20 flex-shrink-0">
+                <span className="w-6 font-bold text-gray-500 text-right">{qNum}.</span>
+                {!isCorrect && detected !== null && detected !== undefined && (
+                  <XCircle size={16} className="text-red-500" />
+                )}
+                {isCorrect && (
+                  <CheckCircle size={16} className="text-green-500" />
+                )}
+              </div>
+              
+              <div className="flex flex-wrap gap-1 flex-1 justify-end">
+                {detected === null && (
+                  <span className="text-xs text-orange-500 font-medium mr-2 self-center">Blank</span>
+                )}
+                {config.labels.map((label, optIndex) => (
+                  <button
+                    key={optIndex}
+                    onClick={() => updateAnswer(qNum, optIndex)}
+                    className={`w-8 h-8 rounded-full border text-xs font-bold flex items-center justify-center transition-all ${
+                      detected === optIndex 
+                        ? (isCorrect 
+                            ? 'bg-green-500 border-green-500 text-white shadow-sm' 
+                            : 'bg-red-500 border-red-500 text-white shadow-sm')
+                        : correct === optIndex 
+                            ? 'border-green-400 text-green-600 bg-green-50' // Highlight correct answer
+                            : 'border-gray-200 text-gray-400 hover:bg-gray-100 bg-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
+          );
+        })}
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t flex justify-center shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
+        <div className="max-w-md w-full flex gap-3">
+           <Button variant="secondary" onClick={() => onNavigate('scanner')} className="flex-1">Discard</Button>
+           <Button onClick={handleSaveResultClick} disabled={saving || !studentId.trim()} className="flex-[2]">
+             {saving ? <RefreshCw className="animate-spin" /> : <Save />}
+             Save Result
+           </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- View: Print/Download Template ---
+function PrintTemplate({ exam, onNavigate }) {
+  if (!exam) return null;
+
+  const configs = getQuestionConfigs(exam);
+  
+  // Calculate max options to adjust print grid
+  const maxOptions = Math.max(...configs.map(c => c.labels.length));
+  
+  // Determine layout class dynamically based on how many bubbles we have
+  const gridLayoutClass = maxOptions > 6 ? 'columns-1 md:columns-2' : 'columns-2 md:columns-3 lg:columns-4';
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body * { visibility: hidden; }
+          #printable-omr, #printable-omr * { visibility: visible; }
+          #printable-omr { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 20px; }
+          .no-print { display: none !important; }
+        }
+      `}} />
+
+      {/* Action Bar */}
+      <div className="bg-white border-b shadow-sm p-4 sticky top-0 z-10 no-print flex justify-between items-center">
+        <Button onClick={() => onNavigate('exam-detail')} variant="secondary" icon={ChevronLeft}>Back</Button>
+        <Button onClick={() => window.print()} icon={Printer}>Print / Save PDF</Button>
+      </div>
+
+      {/* Printable Area */}
+      <div className="p-8 pb-20 no-print">
+        <div id="printable-omr" className="max-w-[210mm] mx-auto bg-white border-2 border-black p-10 min-h-[297mm]">
+          
+          {/* Registration Marks / Alignment Boxes */}
+          <div className="flex justify-between w-full mb-4">
+            <div className="w-6 h-6 bg-black"></div>
+            <div className="w-6 h-6 bg-black"></div>
           </div>
 
-          <div className="space-y-3">
-            {classes.length === 0 ? (
-               <div className="text-center bg-white py-12 rounded-2xl border border-gray-100 shadow-sm">
-                 <Icon name="Users" size={48} className="text-gray-200 mb-3 mx-auto" />
-                 <p className="text-gray-500 font-medium">No classes created yet. Add one above.</p>
-               </div>
-            ) : (
-              classes.map(cls => (
-                <div key={cls.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition hover:shadow-md">
-                  <div>
-                    <h3 className="font-bold text-xl text-gray-800">{cls.name}</h3>
-                    <p className="text-sm text-blue-600 font-medium mt-1 bg-blue-50 inline-block px-2 py-0.5 rounded">
-                      {cls.students.length} Students enrolled
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
-                    {confirmDelete === cls.id ? (
-                      <div className="flex items-center gap-1 bg-red-50 p-1.5 rounded-xl border border-red-100 shrink-0">
-                        <span className="text-xs font-black text-red-600 px-2 uppercase tracking-wide">Delete?</span>
-                        <button onClick={() => { deleteClass(cls.id); setConfirmDelete(null); }} className="bg-red-500 text-white p-1.5 rounded-lg hover:bg-red-600 shadow-sm transition"><Icon name="CheckCircle" size={16} /></button>
-                        <button onClick={() => setConfirmDelete(null)} className="bg-gray-200 text-gray-700 p-1.5 rounded-lg hover:bg-gray-300 transition"><Icon name="XCircle" size={16} /></button>
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={() => setConfirmDelete(cls.id)} 
-                        className="bg-red-50 text-red-600 p-3 rounded-xl hover:bg-red-100 transition flex items-center justify-center gap-2 font-semibold text-sm shrink-0" 
-                        title="Delete Class"
-                      >
-                        <Icon name="Trash" size={18} />
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => { setCurrentClass(cls); setView('class_details'); }}
-                      className="text-blue-600 bg-blue-50 px-5 py-3 rounded-xl font-bold hover:bg-blue-100 transition"
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold uppercase tracking-wider mb-2">{exam.title}</h1>
+            <p className="text-sm font-medium border border-black inline-block px-4 py-1">OMR Answer Sheet</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-12 gap-y-6 mb-10 text-sm font-semibold uppercase">
+             <div className="border-b-2 border-black pb-1 flex">
+                <span className="w-24">Name:</span>
+             </div>
+             <div className="border-b-2 border-black pb-1 flex">
+                <span className="w-24">Class/Sec:</span>
+             </div>
+             <div className="border-b-2 border-black pb-1 flex">
+                <span className="w-24">Roll No:</span>
+             </div>
+             <div className="border-b-2 border-black pb-1 flex">
+                <span className="w-24">Date:</span>
+             </div>
+          </div>
+
+          <div className="mb-6 text-xs font-semibold text-center border-y-2 border-black py-2 uppercase">
+            Darken the circle completely for your chosen answer. Erase completely to change.
+          </div>
+
+          {/* Bubbles Grid */}
+          <div className={`gap-x-8 gap-y-3 ${gridLayoutClass}`}>
+            {configs.map((config, i) => (
+              <div key={i} className="flex items-center gap-3 mb-4 break-inside-avoid">
+                <span className="w-6 text-right font-bold text-sm">{config.qNum}.</span>
+                <div className="flex gap-1.5 flex-wrap">
+                  {config.labels.map((label, optIndex) => (
+                    <div 
+                      key={optIndex} 
+                      className="w-5 h-5 rounded-full border-[1.5px] border-black flex items-center justify-center text-[9px] font-bold text-black bg-white"
                     >
-                      Manage Roster
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      );
-    }
-
-    // --- ROSTER: CLASS DETAILS & ENROLLMENT ---
-    function ClassDetails({ currentClass, saveClass, setView, showToast }) {
-      const [name, setName] = useState('');
-      const [rollNo, setRollNo] = useState('');
-      const [bulkData, setBulkData] = useState('');
-      const [isBulkMode, setIsBulkMode] = useState(false);
-
-      const formatRollNo = (val) => {
-        const strVal = String(val).trim();
-        return /^\d+$/.test(strVal) ? strVal.padStart(2, '0') : strVal;
-      };
-
-      const removeStudent = async (studentId) => {
-        const updatedClass = { 
-          ...currentClass, 
-          students: currentClass.students.filter(s => s.id !== studentId) 
-        };
-        await saveClass(updatedClass);
-        showToast("Student removed!");
-      };
-
-      const addSingle = async () => {
-        if (!name || !rollNo) return showToast("Fill both fields");
-        const updatedClass = { 
-          ...currentClass, 
-          students: [...currentClass.students, { id: Date.now().toString(), name, rollNo: formatRollNo(rollNo) }] 
-        };
-        await saveClass(updatedClass);
-        setName(''); setRollNo('');
-        showToast("Student added!");
-      };
-
-      const addBulk = async () => {
-        if (!bulkData.trim()) return showToast("No data to import");
-        const lines = bulkData.split('\n');
-        const newStudents = lines.map(line => {
-          const parts = line.split(/[,\t]+/).map(s => s.trim());
-          if (parts.length >= 2) {
-             return { id: Math.random().toString(), rollNo: formatRollNo(parts[0]), name: parts[1] };
-          }
-          return null;
-        }).filter(Boolean);
-
-        if (newStudents.length === 0) return showToast("Could not read any valid data");
-
-        const updatedClass = { ...currentClass, students: [...currentClass.students, ...newStudents] };
-        await saveClass(updatedClass);
-        setBulkData('');
-        setIsBulkMode(false);
-        showToast(`Imported ${newStudents.length} students!`);
-      };
-
-      return (
-        <div className="space-y-6">
-          <div className="flex items-center gap-3 mb-2">
-            <button onClick={() => setView('classes')} className="text-gray-500 hover:text-blue-600 transition bg-white p-2 rounded-full shadow-sm border border-gray-100">
-              <Icon name="ChevronLeft" size={20} />
-            </button>
-            <h2 className="text-3xl font-black text-gray-800">{currentClass.name}</h2>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
-              <h3 className="text-lg font-black text-gray-800 flex items-center gap-2">
-                 {isBulkMode ? <Icon name="Upload" className="text-blue-600"/> : <Icon name="UserPlus" className="text-blue-600"/>} 
-                 {isBulkMode ? "Bulk Enroll Students" : "Enroll Single Student"}
-              </h3>
-              <button onClick={() => setIsBulkMode(!isBulkMode)} className="text-sm bg-gray-100 text-gray-700 font-bold px-3 py-1.5 rounded-lg hover:bg-gray-200">
-                Switch to {isBulkMode ? 'Single Mode' : 'Bulk Mode'}
-              </button>
-            </div>
-
-            {!isBulkMode ? (
-              <div className="flex flex-col sm:flex-row gap-3">
-                <input type="text" value={rollNo} onChange={e => setRollNo(e.target.value)} placeholder="Roll No" className="w-full sm:w-1/3 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 font-bold text-center" />
-                <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Student Full Name" className="w-full flex-1 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 font-medium" />
-                <button onClick={addSingle} className="bg-blue-600 text-white px-8 py-4 rounded-xl font-black shadow-md hover:bg-blue-700">Add</button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-gray-600 font-medium bg-blue-50 p-3 rounded-lg border border-blue-100">
-                  <span className="font-bold text-blue-800">Instructions:</span> Paste data from Excel. Use the format <code>RollNo, Name</code> per line.
-                </p>
-                <textarea 
-                  value={bulkData} onChange={e => setBulkData(e.target.value)} 
-                  rows="5" className="w-full p-4 border border-gray-300 rounded-xl outline-none font-mono text-sm bg-gray-50" 
-                  placeholder="01, John Doe&#10;02, Jane Smith"
-                ></textarea>
-                <button onClick={addBulk} className="w-full bg-blue-600 text-white py-4 rounded-xl font-black shadow-md hover:bg-blue-700 flex justify-center items-center gap-2">
-                  <Icon name="CloudUpload" /> Import Data
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="bg-gray-50 p-5 border-b border-gray-200 flex justify-between items-center">
-               <h3 className="font-black text-gray-800 text-lg">Class Roster</h3>
-               <span className="bg-blue-100 text-blue-800 font-bold text-xs px-3 py-1 rounded-full uppercase tracking-wider">{currentClass.students.length} Total</span>
-            </div>
-            <div className="max-h-96 overflow-y-auto custom-scrollbar">
-              {currentClass.students.length === 0 ? (
-                <p className="p-8 text-center text-gray-500 font-medium">No students enrolled yet.</p>
-              ) : (
-                <table className="w-full text-left border-collapse">
-                  <tbody>
-                    {currentClass.students.map((student, idx) => (
-                      <tr key={student.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition">
-                        <td className="p-4 pl-6 text-gray-400 font-bold w-12 text-sm">{idx + 1}</td>
-                        <td className="p-4 font-black font-mono text-gray-700 w-32 bg-gray-50/50 border-r border-gray-100">{student.rollNo}</td>
-                        <td className="p-4 font-bold text-gray-800">{student.name}</td>
-                        <td className="p-4 text-right">
-                          <button 
-                            onClick={() => removeStudent(student.id)} 
-                            className="text-red-400 hover:text-red-600 transition p-2 bg-red-50 hover:bg-red-100 rounded-lg"
-                            title="Remove Student"
-                          >
-                            <Icon name="Trash" size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // --- ITEM ANALYSIS COMPONENT ---
-    function ItemAnalysis({ exam, setView }) {
-      const results = exam.results || [];
-      const totalScans = results.length;
-
-      return (
-        <div className="space-y-6 mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-blue-600 transition bg-white p-2 rounded-full shadow-sm border border-gray-100">
-              <Icon name="ChevronLeft" size={20} />
-            </button>
-            <h2 className="text-3xl font-black text-gray-800">Item Analysis</h2>
-          </div>
-
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 border-b border-gray-100 pb-6">
-              <div>
-                <h3 className="text-xl font-black text-gray-800">{exam.name}</h3>
-                <p className="text-sm font-bold text-gray-500 mt-1 uppercase tracking-widest">{totalScans} Total Scans Recorded</p>
-              </div>
-              <div className="flex items-center gap-6 bg-gray-50 p-4 rounded-xl border border-gray-200 w-full md:w-auto">
-                <div className="text-center w-full">
-                  <div className="text-4xl font-black text-blue-600">
-                    {totalScans > 0 ? ((results.reduce((acc, r) => acc + r.score, 0) / (totalScans * exam.questions)) * 100).toFixed(1) : '0'}%
-                  </div>
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-1">Class Average</p>
+                      {label}
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-
-            {totalScans === 0 ? (
-              <div className="text-center py-12">
-                <Icon name="Camera" size={48} className="text-gray-200 mx-auto mb-4" />
-                <p className="text-gray-500 font-bold text-lg">No scans recorded yet.</p>
-                <p className="text-gray-400 text-sm mt-1">Scan answer sheets to generate beautiful analytics.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto custom-scrollbar pb-4">
-                <table className="w-full text-left border-collapse min-w-[700px]">
-                  <thead>
-                    <tr className="bg-gray-50 border-y border-gray-200">
-                      <th className="p-4 text-xs font-black text-gray-500 uppercase tracking-widest w-16 text-center border-r border-gray-200">Item</th>
-                      <th className="p-4 text-xs font-black text-gray-500 uppercase tracking-widest w-20 text-center border-r border-gray-200">Key</th>
-                      <th className="p-4 text-xs font-black text-gray-500 uppercase tracking-widest w-1/3 border-r border-gray-200">Difficulty Level (Correct %)</th>
-                      <th className="p-4 text-xs font-black text-gray-500 uppercase tracking-widest">Student Response Distribution</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {exam.answerKey.map((qData, qIdx) => {
-                      let correctCount = 0;
-                      const dist = Array(qData.options).fill(0);
-                      let invalidCount = 0;
-
-                      results.forEach(r => {
-                        const ans = r.scannedAnswers[qIdx];
-                        if (ans === qData.answer) correctCount++;
-                        if (ans >= 0 && ans < qData.options) {
-                          dist[ans]++;
-                        } else {
-                          invalidCount++;
-                        }
-                      });
-
-                      const correctPct = Math.round((correctCount / totalScans) * 100);
-                      const isEasy = correctPct >= 75;
-                      const isHard = correctPct <= 40;
-
-                      const keyLabel = qData.type === 'true_false' 
-                        ? (qData.answer === 0 ? 'T' : 'F') 
-                        : String.fromCharCode(65 + qData.answer);
-
-                      return (
-                        <tr key={qIdx} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition">
-                          <td className="p-4 font-black text-gray-700 text-center border-r border-gray-100 bg-gray-50/30 text-lg">Q{qIdx + 1}</td>
-                          <td className="p-4 font-black text-blue-600 text-center border-r border-gray-100 text-xl">{keyLabel}</td>
-                          <td className="p-4 border-r border-gray-100">
-                            <div className="flex items-center gap-3">
-                              <span className={`w-12 text-right font-black text-sm ${isEasy ? 'text-green-600' : isHard ? 'text-red-600' : 'text-yellow-600'}`}>
-                                {correctPct}%
-                              </span>
-                              <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden shadow-inner">
-                                <div 
-                                  className={`h-full transition-all duration-1000 ${isEasy ? 'bg-green-500' : isHard ? 'bg-red-500' : 'bg-yellow-400'}`}
-                                  style={{ width: `${correctPct}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex gap-2">
-                              {dist.map((count, optIdx) => {
-                                const label = qData.type === 'true_false' ? (optIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + optIdx);
-                                const isKey = optIdx === qData.answer;
-                                const pct = Math.round((count / totalScans) * 100);
-                                return (
-                                  <div key={optIdx} className={`flex flex-col justify-center items-center w-12 h-12 rounded-lg border-2 ${isKey ? 'bg-blue-50 border-blue-400 shadow-sm' : 'bg-white border-gray-200'}`}>
-                                    <span className={`text-xs font-bold ${isKey ? 'text-blue-600' : 'text-gray-400'}`}>{label}</span>
-                                    <span className={`text-sm font-black ${isKey ? 'text-blue-800' : 'text-gray-800'}`}>{pct}%</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            ))}
           </div>
+
+          {/* Bottom Registration Marks */}
+          <div className="flex justify-between w-full mt-10">
+            <div className="w-6 h-6 bg-black"></div>
+            <div className="w-6 h-6 bg-black"></div>
+          </div>
+
+          <div className="text-center text-[10px] font-bold uppercase tracking-widest mt-6 text-gray-500">
+            Developed by PVNJ
+          </div>
+
         </div>
-      );
-    }
-
-    // --- OMR SHEET PRINT TEMPLATE COMPONENT ---
-    function OMRSheetTemplate({ exam, setView, showToast }) {
-      const printAreaRef = useRef(null);
-      const [isExporting, setIsExporting] = useState(false);
-      const [customHeader, setCustomHeader] = useState("OFFICIAL OMR ANSWER SHEET");
-      const [customInstructions, setCustomInstructions] = useState("INSTRUCTIONS: Completely fill in the circle corresponding to your answer. Do not use checkmarks or Xs.");
-
-      // Calculate perfect pixel dimensions to force html2canvas and printing to identical scales
-      const PRINT_W = 816; // 8.5 inches at 96 DPI
-      const PRINT_H = 1056; // 11 inches at 96 DPI
-
-      // Calculate column layout dynamically
-      const numCols = exam.questions <= 40 ? 2 : exam.questions <= 90 ? 3 : exam.questions <= 140 ? 4 : 5;
-      const rowsPerCol = Math.ceil(exam.questions / numCols);
-      const maxOptions = Math.max(...exam.answerKey.map(q => q.options), 1);
-
-      // Determine explicit pixel sizes based on density to avoid html2canvas scaling bugs
-      // And ensure that bubbles always fit the space perfectly
-      const maxRowH = 600 / rowsPerCol;
-      const ansBubbleSize = Math.max(10, Math.floor(Math.min(maxRowH * 0.85, 24)));
-      const ansFontSize = Math.max(7, Math.floor(ansBubbleSize * 0.55));
-
-      const rnBubbleSize = 18;
-      const rnFontSize = 10;
-
-      const handlePrint = () => {
-        window.print();
-      };
-
-      const handleExportJPEG = async () => {
-        if (!printAreaRef.current) return;
-        setIsExporting(true);
-        try {
-          const canvas = await html2canvas(printAreaRef.current, { 
-             scale: 2, 
-             useCORS: true, 
-             backgroundColor: '#ffffff',
-             width: PRINT_W,
-             height: PRINT_H 
-          });
-          const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
-          const link = document.createElement('a');
-          link.download = `${exam.name.replace(/\s+/g, '_')}_OMR.jpg`;
-          link.href = dataUrl;
-          link.click();
-          if (showToast) showToast("JPEG exported successfully!");
-        } catch (error) {
-          console.error("Export Error:", error);
-          if (showToast) showToast("Error generating JPEG");
-        }
-        setIsExporting(false);
-      };
-
-      const handleExportPDF = async () => {
-        if (!printAreaRef.current) return;
-        setIsExporting(true);
-        try {
-          const canvas = await html2canvas(printAreaRef.current, { 
-             scale: 2, 
-             useCORS: true, 
-             backgroundColor: '#ffffff',
-             width: PRINT_W,
-             height: PRINT_H 
-          });
-          const imgData = canvas.toDataURL('image/jpeg', 1.0);
-          
-          const { jsPDF } = window.jspdf;
-          const pdf = new jsPDF('p', 'in', 'letter');
-          pdf.addImage(imgData, 'JPEG', 0, 0, 8.5, 11);
-          pdf.save(`${exam.name.replace(/\s+/g, '_')}_OMR.pdf`);
-          if (showToast) showToast("PDF exported successfully!");
-        } catch (error) {
-          console.error("Export Error:", error);
-          if (showToast) showToast("Error generating PDF");
-        }
-        setIsExporting(false);
-      };
-
-      return (
-        <div className="bg-white p-4 sm:p-8 rounded-2xl shadow-sm border border-gray-100 mb-8 print:p-0 print:shadow-none print:border-none print:m-0 print:bg-transparent">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print-hidden">
-            <button onClick={() => setView('dashboard')} className="text-gray-500 hover:text-blue-600 transition bg-gray-50 p-2 rounded-xl border border-gray-200 flex items-center gap-2 px-4 font-bold">
-              <Icon name="ChevronLeft" size={20} /> Back
-            </button>
-            
-            <div className="flex flex-wrap gap-2 w-full md:w-auto">
-              <button 
-                onClick={handleExportJPEG} 
-                disabled={isExporting}
-                className="bg-gray-100 text-gray-700 px-4 py-3 rounded-xl hover:bg-gray-200 transition flex items-center justify-center gap-2 font-bold flex-1 md:flex-none disabled:opacity-50"
-              >
-                <Icon name="Image" size={18} /> JPEG
-              </button>
-              <button 
-                onClick={handleExportPDF} 
-                disabled={isExporting}
-                className="bg-red-50 text-red-600 px-4 py-3 rounded-xl hover:bg-red-100 transition flex items-center justify-center gap-2 font-bold flex-1 md:flex-none disabled:opacity-50"
-              >
-                <Icon name="FilePdf" size={18} /> PDF
-              </button>
-              <button 
-                onClick={handlePrint} 
-                disabled={isExporting}
-                className="bg-blue-600 text-white px-6 py-3 rounded-xl shadow-md hover:bg-blue-700 transition flex items-center justify-center gap-2 font-bold flex-1 md:flex-none disabled:opacity-50"
-              >
-                <Icon name="Printer" size={18} /> Print
-              </button>
-            </div>
-          </div>
-
-          <div className="mb-6 print-hidden bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-col gap-4">
-             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                <label className="font-bold text-blue-900 whitespace-nowrap w-32">Custom Header:</label>
-                <input type="text" value={customHeader} onChange={e => setCustomHeader(e.target.value)} className="flex-1 w-full p-2 rounded-lg border border-blue-200 outline-none font-bold text-gray-800" placeholder="Enter header text..." />
-             </div>
-             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                <label className="font-bold text-blue-900 whitespace-nowrap w-32">Instructions:</label>
-                <input type="text" value={customInstructions} onChange={e => setCustomInstructions(e.target.value)} className="flex-1 w-full p-2 rounded-lg border border-blue-200 outline-none font-medium text-gray-800" placeholder="Leave blank for no instructions" />
-             </div>
-          </div>
-
-          {/* Wrapper to allow mobile scrolling while maintaining perfect 816x1056 aspect ratio for html2canvas */}
-          <div className="w-full flex justify-center overflow-x-auto pb-4 custom-scrollbar bg-gray-100 print:bg-transparent rounded-xl print:rounded-none">
-            <div 
-              ref={printAreaRef} 
-              className="print-area bg-white relative shrink-0" 
-              style={{ width: `${PRINT_W}px`, height: `${PRINT_H}px`, boxSizing: 'border-box' }}
-            >
-              {/* SOLID BLACK REGISTRATION MARKERS (Essential for Optical Scanning) */}
-              <div className="absolute top-0 left-0 w-[40px] h-[40px] bg-black"></div>
-              <div className="absolute top-0 right-0 w-[40px] h-[40px] bg-black"></div>
-              <div className="absolute bottom-0 left-0 w-[40px] h-[40px] bg-black"></div>
-              <div className="absolute bottom-0 right-0 w-[40px] h-[40px] bg-black"></div>
-
-              {/* Title Section (Top 0 to 8%) */}
-              <div className="absolute w-full text-center border-b-2 border-black pb-2" style={{ top: '3%', height: '5%' }}>
-                <h1 className="font-black uppercase tracking-widest text-black" style={{ fontSize: '32px' }}>
-                  <span style={{ display: 'block', marginTop: '-23px' }}>{customHeader || " "}</span>
-                </h1>
-              </div>
-
-              {/* Information Section (Top 10%, Left 5%, Width 45%, Height 24%) */}
-              <div className="absolute border-2 border-black p-4 flex flex-col justify-between bg-white" style={{ left: '5%', top: '10%', width: '45%', height: '24%' }}>
-                  <div>
-                    <p className="font-black uppercase tracking-widest text-black line-clamp-1 mb-4" style={{ fontSize: '24px' }}>
-                      <span style={{ display: 'block', marginTop: '-23px' }}>&nbsp;</span>
-                    </p>
-                  </div>
-                  <div style={{ marginTop: '20px' }}>
-                    <div className="flex items-end gap-2 w-full mb-3">
-                      <p className="font-bold text-black" style={{ fontSize: '16px' }}>NAME:</p>
-                      <div className="border-b-[2px] border-black flex-1 h-6"></div>
-                    </div>
-                    <div className="flex items-end gap-2 w-full mb-3">
-                      <p className="font-bold text-black" style={{ fontSize: '16px' }}>CLASS:</p>
-                      <span className="flex-1 font-normal border-b-[2px] border-black whitespace-nowrap overflow-hidden text-black" style={{ fontSize: '16px' }}>&nbsp;</span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-end mt-auto gap-4">
-                    <div className="flex items-end gap-2 flex-1">
-                      <p className="font-bold text-black" style={{ fontSize: '16px' }}>DATE:</p>
-                      <div className="flex-1 border-b-[2px] border-black h-6"></div>
-                    </div>
-                    <p className="font-bold text-black whitespace-nowrap" style={{ fontSize: '16px' }}>SCORE: ____ / {exam.questions}</p>
-                  </div>
-              </div>
-
-              {/* Roll No Box (Top 10%, Left 55%, Width 40%, Height 24%) */}
-              <div className="absolute border-2 border-black p-2 bg-white" style={{ left: '55%', top: '10%', width: '40%', height: '24%' }}>
-                 <p className="font-bold uppercase tracking-widest text-black mb-1 text-center" style={{ fontSize: '14px', height: '20px' }}>Roll No.</p>
-                 <div className="absolute border-[2px] border-black left-2 right-2 bottom-2" style={{ top: '30px' }}>
-                   {Array.from({length: exam.rollNoLength || 4}).map((_, c) => (
-                      <div key={c} className="absolute h-full border-r border-black last:border-r-0" style={{ left: `${(100/(exam.rollNoLength || 4))*c}%`, width: `${100/(exam.rollNoLength || 4)}%` }}>
-                         {/* Empty box at the top for writing the digit */}
-                         <div className="absolute top-0 w-full border-b border-black" style={{ height: '30px' }}></div>
-                         
-                         {/* The 0 to 9 column precisely math-positioned */}
-                         <div className="absolute w-full bottom-0" style={{ top: '30px' }}>
-                           {Array.from({length: 10}).map((_, r) => (
-                             <div key={r} className="absolute w-full flex items-center justify-center" style={{ top: `${(100/10)*r}%`, height: `${100/10}%` }}>
-                                 <div className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black box-border"
-                                      style={{ 
-                                        width: `${rnBubbleSize}px`, 
-                                        height: `${rnBubbleSize}px`, 
-                                        fontSize: `${rnFontSize}px`
-                                      }}>
-                                   <span style={{ display: 'block', marginTop: '-8px' }}>{r}</span>
-                                 </div>
-                             </div>
-                           ))}
-                         </div>
-                      </div>
-                   ))}
-                 </div>
-              </div>
-
-              {/* Instructions Section (Top 36%, Left 5%, Width 90%, Height 3%) */}
-              <div className="absolute flex items-end border-b-2 border-gray-300 pb-1" style={{ left: '5%', top: '35%', width: '90%', height: '4%' }}>
-                 <p className="font-bold text-black uppercase tracking-wide" style={{ fontSize: '12px' }}>
-                    {customInstructions}
-                 </p>
-              </div>
-
-              {/* Answers Area (Top 40%, Left 5%, Width 90%, Height 55%) */}
-              <div className="absolute border-[3px] border-black bg-white" style={{ left: '5%', top: '40%', width: '90%', height: '55%' }}>
-                 {Array.from({length: numCols}).map((_, cIdx) => (
-                    <div key={cIdx} className="absolute h-full border-r-2 border-gray-300 last:border-0" style={{ left: `${(100/numCols)*cIdx}%`, width: `${100 / numCols}%` }}>
-                       {Array.from({length: rowsPerCol}).map((_, rIdx) => {
-                          const qIdx = (cIdx * rowsPerCol) + rIdx;
-                          if (qIdx >= exam.questions) return null;
-                          const qData = exam.answerKey[qIdx];
-                          return (
-                             <div key={qIdx} className="absolute w-full flex items-center" style={{ top: `${(100 / rowsPerCol) * rIdx}%`, height: `${100 / rowsPerCol}%` }}>
-                                <div className="absolute left-0 h-full flex items-center justify-end pr-2" style={{ width: '35%' }}>
-                                   <span className="font-bold text-black" style={{ fontSize: `${ansFontSize + 2}px` }}>{qIdx + 1}.</span>
-                                </div>
-                                <div className="absolute right-0 h-full" style={{ width: '65%' }}>
-                                   {Array.from({length: qData.options}).map((_, oIdx) => {
-                                      const label = qData.type === 'true_false' ? (oIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + oIdx);
-                                      return (
-                                         <div key={oIdx} className="absolute h-full flex items-center justify-center" style={{ left: `${(100/qData.options)*oIdx}%`, width: `${100/qData.options}%` }}>
-                                            <div className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black shrink-0"
-                                                 style={{
-                                                    width: `${ansBubbleSize}px`,
-                                                    height: `${ansBubbleSize}px`,
-                                                    fontSize: `${ansFontSize}px`
-                                                 }}>
-                                              <span style={{ display: 'block', marginTop: '-8px' }}>{label}</span>
-                                            </div>
-                                         </div>
-                                      );
-                                   })}
-                                </div>
-                             </div>
-                          );
-                       })}
-                    </div>
-                 ))}
-              </div>
-
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // --- RENDER APP ---
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-
-  </script>
-</body>
-</html>
+      </div>
+    </div>
+  );
+}
