@@ -25,9 +25,18 @@
   <style>
     @media print {
       @page { size: letter portrait; margin: 0; }
-      body { margin: 0; padding: 0; background: #fff; }
+      body { margin: 0; padding: 0; background: #fff; display: flex; justify-content: center; }
       .print-hidden { display: none !important; }
-      .print-area { margin: 0 auto !important; box-shadow: none !important; border: none !important; transform: scale(1) !important; width: 100% !important; height: 100% !important; }
+      .print-area { 
+        margin: 0 !important; 
+        box-shadow: none !important; 
+        border: none !important; 
+        transform: scale(1) !important; 
+        width: 8.5in !important; 
+        height: 11in !important; 
+        page-break-after: avoid;
+        page-break-inside: avoid;
+      }
     }
   </style>
 </head>
@@ -50,12 +59,13 @@
     } else {
       // REPLACE THIS WITH YOUR OWN FIREBASE CONFIG IF HOSTING EXTERNALLY
       firebaseConfig = {
-        apiKey: "AIzaSyAUAqxd3hdWp0BRoG4nFTZCamry7io7k-E",
-        authDomain: "examscanner-e90dd.firebaseapp.com",
-        projectId: "examscanner-e90dd",
-        storageBucket: "examscanner-e90dd.firebasestorage.app",
-        messagingSenderId: "13021828091",
-        appId: "1:13021828091:web:2c8b947cd823a4befbf15e"
+        apiKey: "AIzaSyDQ1oFts4jTQ50MZ3UfjEPjJFX3o3l3mlc",
+        authDomain: "easyomr-99a32.firebaseapp.com",
+        projectId: "easyomr-99a32",
+        storageBucket: "easyomr-99a32.firebasestorage.app",
+        messagingSenderId: "545734045836",
+        appId: "1:545734045836:web:d963157f9a2e3576c94ba9",
+        measurementId: "G-HGY1039P8L"
       };
     }
     
@@ -169,7 +179,7 @@
               </button>
             </div>
 
-            <div className="mt-8 text-center text-xs text-gray-400 font-bold uppercase tracking-wider">
+            <div className="mt-8 text-center text-xs text-gray-400 font-medium">
               Developed by PVNJ
             </div>
           </div>
@@ -394,7 +404,7 @@
               />
             )}
 
-            <div className="print-hidden mt-12 text-center text-xs text-gray-400 font-bold uppercase tracking-wider">
+            <div className="print-hidden mt-12 text-center text-xs text-gray-400 font-medium">
               Developed by PVNJ
             </div>
           </main>
@@ -807,58 +817,118 @@
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        const boxWidth = canvas.width * 0.6;
-        const boxHeight = canvas.height * 0.6;
-        const startX = canvas.width * 0.2;
-        const startY = canvas.height * 0.2;
+        const W = canvas.width;
+        const H = canvas.height;
 
-        const colWidth = boxWidth / numCols;
-        const rowHeight = boxHeight / rowsPerCol;
-        const maxOptions = Math.max(...exam.answerKey.map(q => q.options));
+        // --- ZONE MATHEMATICS (Matches strict UI positioning from the template overlays) ---
+        // 1. Roll Number Zone (Left: 60%, Top: 10%, Width: 35%, Height: 25%)
+        const rnStartX = W * 0.60;
+        const rnStartY = H * 0.10;
+        const rnTotalW = W * 0.35;
+        const rnTotalH = H * 0.25;
         
-        const optionsAreaWidth = colWidth * 0.65;
-        const cellWidth = optionsAreaWidth / maxOptions;
+        const rnColW = rnTotalW / rnLength;
+        const rnRowH = rnTotalH / 10;
+        const rnBoxSize = Math.min(rnColW * 0.5, rnRowH * 0.5);
+
+        let scannedRollNo = '';
+
+        for (let c = 0; c < rnLength; c++) {
+          let maxD = 0;
+          let bestVal = -1;
+          for (let r = 0; r < 10; r++) {
+            const cellCenterX = rnStartX + (c * rnColW) + (rnColW / 2);
+            // We sample slightly lower to account for the text input boxes at the top of the grid
+            const cellCenterY = rnStartY + (r * rnRowH) + (rnRowH / 1.5);
+            
+            const sx = cellCenterX - (rnBoxSize / 2);
+            const sy = cellCenterY - (rnBoxSize / 2);
+            const sw = rnBoxSize;
+            const sh = rnBoxSize;
+            
+            const imgD = ctx.getImageData(sx, sy, sw, sh);
+            const d = calculateDarkness(imgD.data);
+            
+            if (d > maxD && d > 40) { 
+              maxD = d;
+              bestVal = r;
+            }
+          }
+          scannedRollNo += bestVal !== -1 ? bestVal.toString() : '?';
+        }
+
+        // --- 2. Answers Zone (Left: 5%, Top: 38%, Width: 90%, Height: 58%) ---
+        const ansStartX = W * 0.05;
+        const ansStartY = H * 0.38;
+        const ansTotalW = W * 0.90;
+        const ansTotalH = H * 0.58;
+
+        const ansColW = ansTotalW / numCols;
+        const ansRowH = ansTotalH / rowsPerCol;
+        const maxOptions = Math.max(...exam.answerKey.map(q => q.options));
+        const optAreaW = ansColW * 0.7; // Leave 30% width for question numbers
+        const cellW = optAreaW / maxOptions;
+        const boxSize = Math.min(cellW * 0.6, ansRowH * 0.6);
 
         let scannedAnswers = [];
         let score = 0;
 
-        // Note: Basic scanner processes answers within the 60% bounding box
         for (let q = 0; q < exam.questions; q++) {
           const qData = exam.answerKey[q];
-          const colIndex = Math.floor(q / rowsPerCol);
-          const rowIndex = q % rowsPerCol;
+          const cIdx = Math.floor(q / rowsPerCol);
+          const rIdx = q % rowsPerCol;
           
-          const colStartX = startX + (colIndex * colWidth) + (colWidth * 0.35);
+          const qStartX = ansStartX + (cIdx * ansColW) + (ansColW * 0.35); // offset past Q number
+          const qStartY = ansStartY + (rIdx * ansRowH);
 
-          let maxDarkness = 0;
-          let selectedOption = -1;
+          let maxD = 0;
+          let bestOpt = -1;
 
           for (let o = 0; o < qData.options; o++) {
-            const sampleX = colStartX + (o * cellWidth) + (cellWidth * 0.2);
-            const sampleY = startY + (rowIndex * rowHeight) + (rowHeight * 0.2);
-            const sampleW = cellWidth * 0.6;
-            const sampleH = rowHeight * 0.6;
+            const cellCenterX = qStartX + (o * cellW) + (cellW / 2);
+            const cellCenterY = qStartY + (ansRowH / 2);
 
-            const imgData = ctx.getImageData(sampleX, sampleY, sampleW, sampleH);
-            const darkness = calculateDarkness(imgData.data);
+            const sx = cellCenterX - (boxSize / 2);
+            const sy = cellCenterY - (boxSize / 2);
+            const sw = boxSize;
+            const sh = boxSize;
 
-            if (darkness > maxDarkness && darkness > 40) {
-              maxDarkness = darkness;
-              selectedOption = o;
+            const imgD = ctx.getImageData(sx, sy, sw, sh);
+            const d = calculateDarkness(imgD.data);
+
+            if (d > maxD && d > 40) {
+              maxD = d;
+              bestOpt = o;
             }
           }
-          scannedAnswers.push(selectedOption);
-          if (selectedOption === qData.answer) {
-            score++;
+          scannedAnswers.push(bestOpt);
+          if (bestOpt === qData.answer) score++;
+        }
+
+        // --- ROSTER LOOKUP ---
+        let foundName = '';
+        const cleanRoll = scannedRollNo.replace(/\?/g, '');
+        
+        if (exam.classId && classes.length > 0) {
+          const assignedClass = classes.find(c => c.id === exam.classId);
+          if (assignedClass && cleanRoll) {
+            const matchedStudent = assignedClass.students.find(s => 
+              s.rollNo === cleanRoll || parseInt(s.rollNo) === parseInt(cleanRoll)
+            );
+            if (matchedStudent) {
+              foundName = matchedStudent.name;
+            }
           }
         }
 
-        setResult({ score, total: exam.questions, scannedAnswers, scannedRollNo: 'Manual' });
+        setResult({ score, total: exam.questions, scannedAnswers, scannedRollNo });
+        setStudentId(cleanRoll);
+        setScannedStudentName(foundName);
         setIsProcessing(false);
       };
 
       const saveResult = async () => {
-        if (!studentId) return showToast("Please enter a Student ID/Name");
+        if (!studentId) return showToast("Please verify Student ID/Name before saving");
         
         const newResult = {
           studentId,
@@ -895,57 +965,90 @@
                 ref={videoRef} autoPlay playsInline 
                 className="absolute inset-0 w-full h-full object-cover opacity-80"
               />
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-[60%] h-[60%] border-4 border-dashed border-yellow-400 rounded-xl relative shadow-[0_0_0_9999px_rgba(0,0,0,0.4)]">
-                   <span className="absolute -top-8 left-1/2 transform -translate-x-1/2 text-yellow-400 text-xs font-black bg-black/80 px-4 py-1.5 rounded-full whitespace-nowrap">
-                     ALIGN BUBBLES INSIDE GRID
-                   </span>
-                   {Array.from({length: numCols - 1}).map((_, i) => (
-                     <div key={i} className="absolute top-0 bottom-0 w-0.5 bg-yellow-400/50" style={{ left: `${(i+1) * (100/numCols)}%` }}></div>
-                   ))}
-                   {Array.from({length: Math.min(10, rowsPerCol) - 1}).map((_, i) => (
-                     <div key={i} className="absolute left-0 right-0 h-0.5 bg-yellow-400/20" style={{ top: `${(i+1) * (100/Math.min(10, rowsPerCol))}%` }}></div>
-                   ))}
-                </div>
+              
+              {/* TARGETING OVERLAYS */}
+              <div className="absolute inset-0 pointer-events-none p-4">
+                 {/* Roll No Guide */}
+                 <div className="absolute border-2 border-blue-400 bg-blue-400/20 rounded"
+                      style={{ left: '60%', top: '10%', width: '35%', height: '25%' }}>
+                    <span className="absolute -top-5 left-0 text-blue-400 text-[10px] font-bold bg-black/80 px-2 py-0.5 rounded">ROLL NO.</span>
+                 </div>
+                 {/* Answers Guide */}
+                 <div className="absolute border-2 border-green-400 bg-green-400/20 rounded"
+                      style={{ left: '5%', top: '38%', width: '90%', height: '58%' }}>
+                    <span className="absolute -top-5 left-0 text-green-400 text-[10px] font-bold bg-black/80 px-2 py-0.5 rounded">ANSWERS</span>
+                 </div>
               </div>
+
               <button 
                 onClick={processImage}
                 disabled={isProcessing}
-                className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white text-blue-600 font-black py-4 px-10 rounded-full shadow-[0_4px_20px_rgba(255,255,255,0.4)] hover:scale-105 transition disabled:opacity-50 text-lg"
+                className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white text-blue-600 font-black py-4 px-10 rounded-full shadow-[0_4px_20px_rgba(255,255,255,0.4)] hover:scale-105 transition disabled:opacity-50 text-lg z-10"
               >
-                {isProcessing ? 'Processing...' : 'Capture & Grade'}
+                {isProcessing ? 'Reading...' : 'Capture Image'}
               </button>
             </div>
           ) : (
-            <div className="flex-1 bg-white p-8 rounded-2xl shadow-lg border border-gray-100 flex flex-col items-center justify-center relative">
-              <div className="absolute top-4 right-4 text-green-500">
-                <Icon name="CheckCircle" size={32} />
-              </div>
+            <div className="flex-1 bg-white p-6 rounded-2xl shadow-lg border border-gray-100 flex flex-col items-center relative overflow-y-auto">
               
-              <div className="text-center mb-8 w-full">
-                <p className="text-gray-500 font-bold uppercase tracking-widest text-sm mb-2">Final Score</p>
+              <div className="text-center w-full mb-6 mt-4">
+                <p className="text-gray-500 font-bold uppercase tracking-widest text-xs mb-1">Final Score</p>
                 <div className="text-6xl font-black text-blue-600 mb-2">
                   {result.score} <span className="text-3xl text-gray-400">/ {result.total}</span>
                 </div>
-                <div className="w-full bg-gray-200 h-3 rounded-full mt-4 overflow-hidden">
+                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden max-w-xs mx-auto">
                   <div className="bg-blue-600 h-full" style={{width: `${(result.score/result.total)*100}%`}}></div>
                 </div>
               </div>
 
-              <div className="mb-8 w-full max-w-sm">
-                 <label className="block text-sm font-bold text-gray-700 mb-2 text-center">Student Name / Roll Number</label>
-                 <input 
-                   type="text" value={studentId} onChange={e => setStudentId(e.target.value)}
-                   className="w-full p-4 border-2 border-blue-200 rounded-xl focus:border-blue-600 outline-none text-center font-bold text-lg bg-blue-50"
-                   placeholder="e.g. John Doe or 001"
-                   autoFocus
-                 />
+              {/* Identity Verification Block */}
+              <div className="w-full max-w-sm bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6 relative">
+                 <div className="absolute -top-3 left-4 bg-blue-600 text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-wider">
+                   Student Verification
+                 </div>
+                 
+                 <div className="mb-3">
+                   <p className="text-xs text-blue-800 font-bold mb-1">Scanned Roll No:</p>
+                   <div className="flex gap-1 justify-center">
+                     {result.scannedRollNo.split('').map((char, i) => (
+                       <div key={i} className={`w-8 h-10 flex items-center justify-center font-mono font-black text-xl rounded border ${char === '?' ? 'bg-red-100 border-red-300 text-red-600' : 'bg-white border-blue-200 text-blue-900'}`}>
+                         {char}
+                       </div>
+                     ))}
+                   </div>
+                   {result.scannedRollNo.includes('?') && (
+                     <p className="text-sm text-red-600 text-center mt-2 font-black">Invalid Roll Number! Please correct manually.</p>
+                   )}
+                 </div>
+
+                 {scannedStudentName ? (
+                   <div className="bg-green-100 border border-green-200 rounded-lg p-3 text-center flex flex-col items-center">
+                     <Icon name="UserCheck" className="text-green-600 mb-1" />
+                     <p className="text-xs text-green-700 font-bold uppercase">Roster Match Found</p>
+                     <p className="font-black text-green-900 text-lg">{scannedStudentName}</p>
+                   </div>
+                 ) : (
+                   <div className="bg-yellow-100 border border-yellow-200 rounded-lg p-3 text-center">
+                     <p className="text-xs text-yellow-700 font-bold">No roster match found for this Roll No.</p>
+                   </div>
+                 )}
+
+                 <div className="mt-4 pt-4 border-t border-blue-200">
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Confirm/Edit Roll No:</label>
+                    <input 
+                      type="text" value={studentId} onChange={e => {
+                        setStudentId(e.target.value);
+                      }}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none text-center font-bold text-lg bg-white"
+                      placeholder="Enter Roll No"
+                    />
+                 </div>
               </div>
 
-              <div className="flex gap-4 w-full max-w-sm">
+              <div className="flex gap-4 w-full max-w-sm mt-auto">
                 <button 
                   onClick={() => setResult(null)}
-                  className="w-1/3 bg-gray-200 text-gray-700 p-4 rounded-xl font-bold hover:bg-gray-300 transition"
+                  className="w-1/3 bg-gray-200 text-gray-700 p-4 rounded-xl font-bold hover:bg-gray-300 transition text-sm"
                 >
                   Discard
                 </button>
@@ -953,7 +1056,7 @@
                   onClick={saveResult}
                   className="w-2/3 bg-green-500 text-white p-4 rounded-xl font-black hover:bg-green-600 flex items-center justify-center gap-2 shadow-lg shadow-green-200 transition"
                 >
-                  <Icon name="Save" size={20} /> Save to Cloud
+                  <Icon name="Save" size={20} /> Save Result
                 </button>
               </div>
             </div>
@@ -1324,20 +1427,19 @@
       const PRINT_W = 816; // 8.5 inches at 96 DPI
       const PRINT_H = 1056; // 11 inches at 96 DPI
 
-      // Calculate cell sizing dynamically for 816x1056 canvas
+      // Calculate column layout dynamically
       const numCols = exam.questions <= 40 ? 2 : exam.questions <= 90 ? 3 : exam.questions <= 140 ? 4 : 5;
       const rowsPerCol = Math.ceil(exam.questions / numCols);
       const maxOptions = Math.max(...exam.answerKey.map(q => q.options), 1);
 
       // Determine explicit pixel sizes based on density to avoid html2canvas scaling bugs
-      let ansBubbleSize = 24;
-      let ansFontSize = 12;
-      if (exam.questions > 50) { ansBubbleSize = 20; ansFontSize = 10; }
-      if (exam.questions > 100) { ansBubbleSize = 16; ansFontSize = 8; }
-      if (exam.questions > 150) { ansBubbleSize = 14; ansFontSize = 7; }
+      // And ensure that bubbles always fit the space perfectly
+      const maxRowH = 600 / rowsPerCol;
+      const ansBubbleSize = Math.max(10, Math.floor(Math.min(maxRowH * 0.85, 24)));
+      const ansFontSize = Math.max(7, Math.floor(ansBubbleSize * 0.55));
 
-      let rnBubbleSize = 18;
-      let rnFontSize = 10;
+      const rnBubbleSize = 18;
+      const rnFontSize = 10;
 
       const handlePrint = () => {
         window.print();
@@ -1347,7 +1449,13 @@
         if (!printAreaRef.current) return;
         setIsExporting(true);
         try {
-          const canvas = await html2canvas(printAreaRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+          const canvas = await html2canvas(printAreaRef.current, { 
+             scale: 2, 
+             useCORS: true, 
+             backgroundColor: '#ffffff',
+             width: PRINT_W,
+             height: PRINT_H 
+          });
           const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
           const link = document.createElement('a');
           link.download = `${exam.name.replace(/\s+/g, '_')}_OMR.jpg`;
@@ -1365,7 +1473,13 @@
         if (!printAreaRef.current) return;
         setIsExporting(true);
         try {
-          const canvas = await html2canvas(printAreaRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+          const canvas = await html2canvas(printAreaRef.current, { 
+             scale: 2, 
+             useCORS: true, 
+             backgroundColor: '#ffffff',
+             width: PRINT_W,
+             height: PRINT_H 
+          });
           const imgData = canvas.toDataURL('image/jpeg', 1.0);
           
           const { jsPDF } = window.jspdf;
@@ -1438,16 +1552,20 @@
 
               {/* Title Section */}
               <div className="text-center border-b-2 border-black pb-2 mb-4 shrink-0">
-                <h1 className="font-black uppercase tracking-widest text-black" style={{ fontSize: '32px' }}>{customHeader || " "}</h1>
+                <h1 className="font-black uppercase tracking-widest text-black" style={{ fontSize: '32px' }}>
+                  <span style={{ display: 'block', marginTop: '-23px' }}>{customHeader || " "}</span>
+                </h1>
               </div>
 
               {/* Information Section and Roll No Section */}
-              <div className="flex justify-between mb-4 h-[200px] shrink-0">
+              <div className="flex justify-between mb-6 h-[260px] shrink-0 items-stretch">
                 <div className="flex-1 border-2 border-black p-4 flex flex-col justify-between mr-6">
                   <div>
-                    <p className="font-black uppercase tracking-widest text-black line-clamp-1 mb-4" style={{ fontSize: '24px' }}>{exam.name}</p>
+                    <p className="font-black uppercase tracking-widest text-black line-clamp-1 mb-4" style={{ fontSize: '24px' }}>
+                      <span style={{ display: 'block', marginTop: '-23px' }}>{exam.name}</span>
+                    </p>
                   </div>
-                  <div>
+                  <div style={{ marginTop: '20px' }}>
                     <div className="flex items-end gap-2 w-full mb-3">
                       <p className="font-bold text-black" style={{ fontSize: '16px' }}>NAME:</p>
                       <div className="border-b-[2px] border-black flex-1 h-6"></div>
@@ -1467,74 +1585,72 @@
                 </div>
 
                 {/* Roll No Box */}
-                <div className="border-2 border-black p-3 flex flex-col items-center justify-between bg-gray-50/50 w-[300px]">
-                   <p className="font-bold uppercase tracking-widest text-black" style={{ fontSize: '14px' }}>Roll No.</p>
-                   <div className="flex w-full h-[30px] mb-2 border-[2px] border-black bg-white">
-                     {Array.from({length: exam.rollNoLength || 4}).map((_, i) => (
-                        <div key={i} className="flex-1 border-r border-black last:border-0 h-full"></div>
-                     ))}
-                   </div>
-                   <div className="flex w-full justify-between px-1 flex-1">
+                <div className="border-2 border-black p-2 flex flex-col items-center w-[280px] bg-white shrink-0">
+                   <p className="font-bold uppercase tracking-widest text-black mb-1" style={{ fontSize: '14px' }}>Roll No.</p>
+                   <div className="flex w-full flex-1 border-[2px] border-black">
                      {Array.from({length: exam.rollNoLength || 4}).map((_, c) => (
-                        <div key={c} className="flex flex-col justify-between items-center h-full">
-                           {Array.from({length: 10}).map((_, r) => (
-                             <div key={r} className="rounded-full border-[1.5px] border-black bg-white font-bold text-black flex items-center justify-center box-border"
-                                  style={{ 
-                                    width: `${rnBubbleSize}px`, 
-                                    height: `${rnBubbleSize}px`, 
-                                    fontSize: `${rnFontSize}px`, 
-                                    lineHeight: `${rnBubbleSize - 3}px`,
-                                    textAlign: 'center'
-                                  }}>
-                               {r}
-                             </div>
-                           ))}
+                        <div key={c} className="flex-1 flex flex-col border-r border-black last:border-r-0 h-full">
+                           {/* Empty box at the top for writing the digit */}
+                           <div className="h-[30px] w-full border-b border-black shrink-0"></div>
+                           
+                           {/* The 0 to 9 column */}
+                           <div className="flex flex-col justify-evenly items-center flex-1 py-1">
+                             {Array.from({length: 10}).map((_, r) => (
+                               <div key={r} className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black box-border shrink-0"
+                                    style={{ 
+                                      width: `${rnBubbleSize}px`, 
+                                      height: `${rnBubbleSize}px`, 
+                                      fontSize: `${rnFontSize}px`
+                                    }}>
+                                 <span style={{ display: 'block', marginTop: '-8px' }}>{r}</span>
+                               </div>
+                             ))}
+                           </div>
                         </div>
                      ))}
                    </div>
                 </div>
               </div>
 
-              {/* Instructions Section */}
-              <div className="border-2 border-black p-2 mb-4 bg-gray-50/30 shrink-0">
-                 <p className="font-bold text-center text-black" style={{ fontSize: '14px' }}>{customInstructions}</p>
+              {/* Instructions Section & Answers Area */}
+              <div className="border-2 border-black p-4 flex-1 flex flex-col min-h-0 bg-white">
+                 <p className="font-bold mb-4 text-center bg-gray-100 text-black py-2 px-2 border-b-2 border-gray-300 shrink-0 uppercase tracking-wide" style={{ fontSize: '12px' }}>
+                    {customInstructions}
+                 </p>
+                 
+                 <div className="flex justify-between gap-6 flex-1 min-h-0">
+                    {Array.from({length: numCols}).map((_, cIdx) => (
+                       <div key={cIdx} className="flex-1 flex flex-col justify-between h-full border-r-2 border-gray-200 pr-4 last:border-0 last:pr-0">
+                          {Array.from({length: rowsPerCol}).map((_, rIdx) => {
+                             const qIdx = (cIdx * rowsPerCol) + rIdx;
+                             if (qIdx >= exam.questions) return <div key={rIdx} style={{ height: `${ansBubbleSize}px` }} className="w-full pointer-events-none opacity-0"></div>;
+                             const qData = exam.answerKey[qIdx];
+                             return (
+                                <div key={qIdx} className="flex items-center w-full justify-between">
+                                   <span className="text-right font-bold text-black shrink-0" style={{ width: '30px', fontSize: `${ansFontSize + 2}px` }}>{qIdx + 1}.</span>
+                                   <div className="flex flex-1 justify-around">
+                                      {Array.from({length: qData.options}).map((_, oIdx) => {
+                                         const label = qData.type === 'true_false' ? (oIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + oIdx);
+                                         return (
+                                            <div key={oIdx} className="rounded-full border-[1.5px] border-black bg-white flex items-center justify-center font-bold text-black shrink-0"
+                                                 style={{
+                                                    width: `${ansBubbleSize}px`,
+                                                    height: `${ansBubbleSize}px`,
+                                                    fontSize: `${ansFontSize}px`
+                                                 }}>
+                                              <span style={{ display: 'block', marginTop: '-8px' }}>{label}</span>
+                                            </div>
+                                         );
+                                      })}
+                                   </div>
+                                </div>
+                             );
+                          })}
+                       </div>
+                    ))}
+                 </div>
               </div>
 
-              {/* Answers Grid Section (Auto-Stretching) */}
-              <div className="flex-1 border-[3px] border-black p-4 flex justify-between bg-gray-50/10">
-                 {Array.from({length: numCols}).map((_, cIdx) => (
-                    <div key={cIdx} className="flex-1 flex flex-col justify-between px-2 border-r-2 border-gray-300 last:border-0 h-full">
-                       {Array.from({length: rowsPerCol}).map((_, rIdx) => {
-                          const qIdx = (cIdx * rowsPerCol) + rIdx;
-                          if (qIdx >= exam.questions) return <div key={rIdx} style={{ height: `${ansBubbleSize}px` }} className="w-full opacity-0 pointer-events-none">.</div>;
-                          const qData = exam.answerKey[qIdx];
-                          return (
-                             <div key={qIdx} className="flex items-center w-full justify-between">
-                                <span className="font-bold text-black text-right" style={{ width: '30px', fontSize: `${ansFontSize + 2}px` }}>{qIdx + 1}.</span>
-                                <div className="flex flex-1 justify-around ml-2">
-                                   {Array.from({length: maxOptions}).map((_, oIdx) => {
-                                      if (oIdx >= qData.options) return <div key={oIdx} style={{ width: `${ansBubbleSize}px` }}></div>;
-                                      const label = qData.type === 'true_false' ? (oIdx === 0 ? 'T' : 'F') : String.fromCharCode(65 + oIdx);
-                                      return (
-                                         <div key={oIdx} className="rounded-full border-[1.5px] border-black bg-white font-bold text-black flex items-center justify-center box-border"
-                                              style={{
-                                                 width: `${ansBubbleSize}px`,
-                                                 height: `${ansBubbleSize}px`,
-                                                 lineHeight: `${ansBubbleSize - 3}px`,
-                                                 fontSize: `${ansFontSize}px`,
-                                                 textAlign: 'center'
-                                              }}>
-                                           {label}
-                                         </div>
-                                      );
-                                   })}
-                                </div>
-                             </div>
-                          );
-                       })}
-                    </div>
-                 ))}
-              </div>
             </div>
           </div>
         </div>
