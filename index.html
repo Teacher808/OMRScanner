@@ -59,12 +59,13 @@
     } else {
       // REPLACE THIS WITH YOUR OWN FIREBASE CONFIG IF HOSTING EXTERNALLY
       firebaseConfig = {
-        apiKey: "AIzaSyAUAqxd3hdWp0BRoG4nFTZCamry7io7k-E",
-        authDomain: "examscanner-e90dd.firebaseapp.com",
-        projectId: "examscanner-e90dd",
-        storageBucket: "examscanner-e90dd.firebasestorage.app",
-        messagingSenderId: "13021828091",
-        appId: "1:13021828091:web:2c8b947cd823a4befbf15e"
+        apiKey: "AIzaSyDQ1oFts4jTQ50MZ3UfjEPjJFX3o3l3mlc",
+        authDomain: "easyomr-99a32.firebaseapp.com",
+        projectId: "easyomr-99a32",
+        storageBucket: "easyomr-99a32.firebasestorage.app",
+        messagingSenderId: "545734045836",
+        appId: "1:545734045836:web:d963157f9a2e3576c94ba9",
+        measurementId: "G-HGY1039P8L"
       };
     }
     
@@ -685,12 +686,17 @@
               </div>
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Roll No. Digits</label>
-                <input 
-                  type="number" min="2" max="6" 
+                <select 
                   value={rollNoLength} 
-                  onChange={e => setRollNoLength(Math.min(6, Math.max(2, parseInt(e.target.value) || 4)))} 
-                  className="w-full p-3 border border-gray-300 rounded-xl outline-none bg-gray-50"
-                />
+                  onChange={e => setRollNoLength(parseInt(e.target.value) || 4)} 
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50"
+                >
+                  <option value={2}>2 Digits</option>
+                  <option value={3}>3 Digits</option>
+                  <option value={4}>4 Digits</option>
+                  <option value={5}>5 Digits</option>
+                  <option value={6}>6 Digits</option>
+                </select>
               </div>
             </div>
 
